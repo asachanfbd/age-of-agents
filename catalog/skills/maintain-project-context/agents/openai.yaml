@@ -1,0 +1,14 @@
+interface:
+  display_name: Project Context Steward
+  short_description: Maintain concise project docs and retrospective lessons
+  default_prompt: Use $maintain-project-context to initialize or update this project’s
+    current documentation from repository evidence and task results.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

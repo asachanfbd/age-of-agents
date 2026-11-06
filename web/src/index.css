@@ -1,0 +1,298 @@
+/* Global resets and the handful of styles that are NOT shadcn components: the plain HTML/body
+ * reset, the Three.js canvas host (`.app`), the drei `<Html>` building-label overlays rendered
+ * inside the 3D scene (web/src/scene/HomeBuilding.tsx, ProjectYard.tsx and its yard tags — deliberately left
+ * alone by the shadcn/ui UI overhaul, since the 3D panel's own design is final), markdown prose
+ * styling shared by every chat/document view.
+ *
+ * Every other UI surface (header, footer, popups, chat) is themed entirely through shadcn/ui
+ * components and Tailwind utility classes — see styles/shadcn.css for the token source of truth
+ * and lib/uiTheme.ts's `initThemeClassSync()` for how `.dark` gets toggled on `<html>`. */
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+/* The HUD's own variable names, aliased to the shared tokens (styles/shadcn.css) so the markdown views
+ * and anything else still using them follow the one palette in light and dark. */
+:root, .dark {
+  --bg: var(--sc-background);
+  --text: var(--sc-foreground);
+  --text-dim: var(--sc-muted-foreground);
+  --accent-strong: var(--sc-brand);
+  --panel-border: var(--sc-border);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+}
+
+.app {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app canvas {
+  position: absolute;
+  inset: 0;
+}
+
+/* No visible focus ring anywhere in the app for now (until asked to bring one back) — without this,
+ * a plain native control (a <select>/<textarea>/<button> with no Tailwind reset of its own) falls
+ * back to the browser's own default focus outline. shadcn components manage their own focus-visible
+ * ring via box-shadow, which this outline reset doesn't affect. */
+button:focus, button:focus-visible,
+input:focus, input:focus-visible,
+select:focus, select:focus-visible,
+textarea:focus, textarea:focus-visible {
+  outline: none;
+}
+
+/* ---------- 3D building labels (rendered via drei <Html> inside the Three.js scene — leave alone) ---------- */
+
+.building-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateY(-4px);
+}
+
+/* Holds the name pill and, under it, the task bar stretched to the pill's width. */
+.building-label-body {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+}
+
+/* Smoky frosted glass: dark enough that the white name stays readable on the bright day sky.
+   Flex drops the inherited 16px line strut so the 10px name is vertically centred in the padding. */
+.building-badge {
+  display: flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(15, 30, 50, 0.32);
+  -webkit-backdrop-filter: blur(8px) saturate(160%);
+  backdrop-filter: blur(8px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 2px 8px rgba(8, 18, 32, 0.25);
+}
+
+.building-label--selected .building-badge {
+  border-color: #62ddff;
+  box-shadow: 0 0 0 2px #62ddff30, inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 2px 8px rgba(8, 18, 32, 0.25);
+}
+
+/* The task bar's track matches the pill's glass so it stays visible against the day sky. */
+.building-progress {
+  background: rgba(15, 30, 50, 0.32);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3);
+}
+
+/* Status colours come from STATUS_STYLES; ProjectStatusDot passes the glow colour as --dot-glow. */
+.building-status-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 8px 3px var(--dot-glow);
+}
+
+/* Over the 3D scene the dot sits above the pill: smaller, white-ringed, with a tighter glow. */
+.building-label .building-status-dot {
+  width: 7px;
+  height: 7px;
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.85), 0 0 6px 2px var(--dot-glow);
+}
+
+.building-name {
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #f4fbff;
+  text-shadow: 0 1px 2px rgba(8, 18, 32, 0.55);
+}
+
+/* The read-only / unavailable badge under a warehouse's label: the cards view's amber wording, as glass. */
+.building-type-badge {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: #fff7e6;
+  background: rgba(180, 110, 10, 0.78);
+  box-shadow: 0 1px 4px rgba(8, 18, 32, 0.25);
+}
+
+/* ---------- 3D village yard tags (drei <Html> over each yard's boxes, machines and robots) ----------
+   White cards with a coloured left edge. State is a colour and a word, never a looping animation;
+   a Needs-you tag gets a static amber glow. */
+.yard-tag {
+  min-width: 120px;
+  max-width: 200px;
+  padding: 5px 8px 5px 9px;
+  border-radius: 8px;
+  border-left: 3px solid #4f8cff;
+  background: rgba(255, 255, 255, 0.96);
+  color: #1e2633;
+  font-size: 11px;
+  line-height: 1.3;
+  box-shadow: 0 2px 10px rgba(15, 30, 50, 0.18);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.yard-tag--compact {
+  min-width: 72px;
+  max-width: 92px;
+  padding: 3px 5px 3px 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  line-height: 1.25;
+  overflow: hidden;
+}
+.yard-tag--running { border-left-color: #10b981; }
+.yard-tag--needs-you { border-left-color: #f59e0b; box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.35), 0 2px 10px rgba(15, 30, 50, 0.18); }
+.yard-tag--stopped { border-left-color: #e5484d; }
+.yard-tag--merge { border-left-color: #7c5cf0; }
+.yard-tag--planning { border-left-color: #14b8a6; }
+.yard-tag--command { border-left-color: #4f8cff; }
+.yard-tag--more { min-width: 0; border-left-color: #94a3b8; }
+.yard-tag--pending { border-left-color: #b98249; }
+
+/* The pending stack's count badge: always shown while anything is pending, and the one clickable tag. */
+.yard-badge {
+  min-width: 22px;
+  padding: 2px 7px;
+  border: 0;
+  border-radius: 999px;
+  background: #b45309;
+  color: #fff7e6;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 1px 4px rgba(8, 18, 32, 0.3);
+  cursor: pointer;
+}
+
+/* The overlay's totals-strip dots, in the yard tags' edge colours (the scene's data colours, not theme tokens). */
+.yard-dot--pending { background: #b98249; }
+.yard-dot--running { background: #10b981; }
+.yard-dot--needs-you { background: #f59e0b; }
+.yard-dot--merge { background: #7c5cf0; }
+.yard-dot--stopped { background: #e5484d; }
+.yard-dot--command { background: #4f8cff; }
+.yard-dot--planning { background: #14b8a6; }
+
+/* The 3D village minimap (ui/VillageNavigationCard.tsx): grass, streets and the camera footprint, in the scene's colours. */
+.minimap { background: #cfe3b8; }
+.minimap__street { stroke: #f4f1e8; }
+.minimap__footprint { fill: rgba(79, 107, 255, 0.16); stroke: #3b55e6; }
+.minimap__target { fill: #3b55e6; }
+.minimap__home,
+.minimap__north { fill: #1f2937; }
+.minimap__dot { stroke: #ffffff; }
+.dark .minimap { background: #2f4a2a; }
+.dark .minimap__street { stroke: #5c6b57; }
+.dark .minimap__home,
+.dark .minimap__north { fill: #e5e7eb; }
+
+.yard-tag__title,
+.yard-tag__line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.yard-tag__title { font-weight: 600; }
+.yard-tag__line { color: #475569; }
+.yard-tag__line--muted { color: #94a3b8; }
+.yard-tag__kind { font-size: 9px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #64748b; }
+.yard-tag__status { font-weight: 600; }
+.yard-tag__status--amber { color: #b45309; }
+.yard-tag__status--red { color: #dc2626; }
+
+.yard-tag__dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.markdown-document { font-size: 15px; line-height: 1.75; overflow-wrap: anywhere; min-width: 0; }
+.markdown-document h1 { font-size: 28px; line-height: 1.3; }
+.markdown-document h2 { font-size: 23px; line-height: 1.4; }
+.markdown-document h3 { font-size: 19px; }
+.markdown-document :is(h1,h2,h3,h4) { margin: 1.4em 0 .6em; }
+.markdown-document > :first-child { margin-top: 16px; }
+.markdown-document a { color: var(--accent-strong); text-decoration: underline; }
+.markdown-document pre { padding: 16px; overflow-x: auto; background: var(--sc-muted); border-radius: var(--sc-radius); }
+.markdown-document code { font-family: var(--font-mono); font-size: .88em; background: var(--sc-muted); border-radius: 4px; padding: 2px 4px; }
+.markdown-document pre code { background: none; padding: 0; }
+.markdown-document blockquote { margin-left: 0; border-left: 3px solid var(--accent-strong); padding-left: 16px; color: var(--text-dim); }
+.markdown-document table { display: block; overflow-x: auto; border-collapse: collapse; max-width: 100%; }
+.markdown-document :is(th,td) { padding: 9px 12px; border: 1px solid var(--panel-border); text-align: left; }
+.markdown-document img { max-width: 100%; height: auto; }
+.markdown-document li + li { margin-top: 4px; }
+.markdown-document hr { border: 0; border-top: 1px solid var(--panel-border); margin: 24px 0; }
+
+/* Agent Analytics (ui/analytics/): series and activity colours, and the band textures that keep
+ * activity kinds apart without relying on colour. */
+:root {
+  --analytics-5h: #2a78d6;
+  --analytics-7d: #eb6834;
+  --analytics-coding: #1baf7a;
+  --analytics-planning: #4a3aa7;
+  --analytics-background: #898781;
+}
+
+.dark {
+  --analytics-5h: #3987e5;
+  --analytics-7d: #d95926;
+  --analytics-coding: #199e70;
+  --analytics-planning: #9085e9;
+}
+
+.analytics-band-part[data-texture='solid'] {
+  background: color-mix(in srgb, var(--band-color) 55%, var(--color-card));
+}
+
+.analytics-band-part[data-texture='striped'] {
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--band-color) 60%, var(--color-card)) 0 4px, color-mix(in srgb, var(--band-color) 20%, var(--color-card)) 4px 8px);
+}
+
+.analytics-band-part[data-texture='dotted'] {
+  background: radial-gradient(var(--band-color) 1px, transparent 1.5px) 0 0 / 5px 5px, color-mix(in srgb, var(--band-color) 18%, var(--color-card));
+}
+
+.analytics-hatch {
+  background: repeating-linear-gradient(45deg, transparent 0 5px, var(--color-border) 5px 6px);
+}
+
+/* An open Radix modal sets `pointer-events: none` on <body>, which the toaster (outside the modal) inherits.
+   Only the toasts opt back in, so the empty space around them stays click-through. */
+[data-sonner-toast] {
+  pointer-events: auto;
+}

@@ -1,0 +1,73 @@
+{
+  "id": "bug-fix",
+  "name": "Bug Fix",
+  "description": "For fixing a bug: find and agree on the root cause first (RCA, which may install dependencies and run tests to reproduce the bug, reviewed up to 3 rounds), then fix it with tests (reviewed against the RCA, up to 3 rounds), get a human sign-off, then document and retro before the built-in Complete stage commits, pushes and raises the PR. Branches are always bugfix/….",
+  "enabled": true,
+  "branchType": "bugfix",
+  "steps": [
+    {
+      "agentId": "software-engineer",
+      "instructions": "Do a detailed root cause analysis (RCA) of the bug this task describes. Do not change any project files: this step is analysis only. You may run commands: install the project's dependencies and run its test suite (the registered testing tools, or the project's own test command). Installs and test runs are not committed, and you must not use commands to edit source files.\n\n1. Reproduce the bug, or, when it can't be reproduced here, trace it through the code from the reported symptom. Install dependencies if needed and run the tests to reproduce the bug and to establish which tests fail before the fix. Say which you did and how (commands run, inputs used, code path followed), and record each command you ran and its result in the report's \"Reproduction\" and \"Tests\" sections. If dependencies can't be installed (no network, registry down), say so in the report.\n2. Identify the root cause: the actual defect, not the symptom. Back it with evidence from the code: file paths with line numbers, the relevant snippets, and why they produce the reported behavior.\n3. List the affected areas: every module, caller, data path or user-facing behavior the defect or its fix touches.\n4. Propose a fix approach that removes the root cause, and name the tests that should prove it. Prefer a regression test that fails before the fix and passes after it, plus any further cases the affected areas need. For each test or check you propose, say who can run it: the Fix step (automated, from a shell) or a person at sign-off (hands-on, for example in a real browser or device). Never make a check the Fix step cannot perform a requirement of that step; list it as a sign-off check with the exact actions and expected results.\n\nCall complete_step with a short summary and your full report as one output named \"RCA report\" (format \"markdown\") with the sections: Reproduction, Root cause, Evidence, Affected areas, Proposed fix, Tests. The Fix step works from this report and the reviewers check the fix against it, so it must stand on its own.\n\nOn a later round (after RCA Review found issues), address every point from the latest review and call complete_step again with the complete, updated RCA report as the output — not just the changes.",
+      "id": "rca",
+      "name": "RCA",
+      "canEditCode": false,
+      "canRunCommands": true,
+      "requiresApproval": false,
+      "quickLook": "none"
+    },
+    {
+      "agentId": "software-engineer",
+      "instructions": "Review the RCA step's latest \"RCA report\" (in Earlier stages' outputs) against the bug this task describes and the code itself. Do not change any project files. Check that:\n\n- the reproduction or trace is credible and actually leads to the reported behavior;\n- the root cause is the real defect, not a symptom, and the cited code evidence supports it (open the cited files and lines to verify);\n- the affected areas are complete: look for other callers and code paths with the same defect;\n- the proposed fix removes the root cause without breaking the affected areas;\n- the proposed tests would prove the fix, including a regression test that fails before the fix where one is feasible.\n\nCall complete_step with verdict \"pass\" if the report is correct and complete enough to fix from, or verdict \"issues\" with a concrete, actionable list of what's wrong or missing if not. On \"issues\" the run goes back to RCA with your list.",
+      "id": "rca-review",
+      "name": "RCA Review",
+      "canEditCode": false,
+      "canRunCommands": false,
+      "requiresApproval": false,
+      "quickLook": "none",
+      "loopBack": {
+        "toStepId": "rca",
+        "maxRounds": 3
+      }
+    },
+    {
+      "agentId": "software-engineer",
+      "instructions": "Fix the bug according to the RCA step's latest \"RCA report\" (in Earlier stages' outputs), which RCA Review approved. Fix the root cause it identifies, not just the symptom, and cover the affected areas it lists. If you find the report is wrong somewhere, make the best fix you can and say clearly in your summary where and why you departed from it.\n\nWrite tests where they apply, following the report's proposed tests. The ideal is a regression test that fails before the fix and passes after it: where you can, confirm it fails without your fix. If no test applies, say why in your summary.\n\nYour summary must say what you changed, which tests you added or changed, and what you ran to verify the fix.\n\nOn a later round (after Bugfix Review found issues, or after the human reviewer requested changes), fix every point from the latest review or request before calling complete_step again. Add your changes on top of the existing work.",
+      "id": "fix",
+      "name": "Fix",
+      "canEditCode": true,
+      "canRunCommands": false,
+      "requiresApproval": false,
+      "quickLook": "code"
+    },
+    {
+      "agentId": "software-engineer",
+      "instructions": "Review the current branch's diff against its base (use diff_summary/diff_file — never assume the whole diff fits in context). If diff_summary reports no base because the run works directly on the checked-out branch, find this task's commits with `git log` (the Fix step's commits and anything after the task's start revision). Review them with `git show <sha>` or `git diff <start>..HEAD`, and name the range you reviewed in your summary. Don't fall back to reading whole files as they are on disk.\n\nCheck the fix against the RCA step's latest \"RCA report\" (in Earlier stages' outputs):\n\n- the change removes the root cause the report identifies, not just the symptom;\n- every affected area the report lists is handled;\n- tests cover the fix, ideally a regression test that would fail without it. This step has no shell, so do not claim the tests pass: check that the Fix step's summary names the commands it ran and their results, that those results are plausible against the diff, and say in your summary that the results are the Fix step's. Send it back if the Fix step reported no test run;\n- the change is otherwise correct and clean, with no unrelated changes.\n\nCall complete_step with verdict \"pass\" if the fix is correct, tested and clean, or verdict \"issues\" with a concrete, actionable list of what's wrong if not. On \"issues\" the run goes back to Fix with your list.",
+      "id": "bugfix-review",
+      "name": "Bugfix Review",
+      "canEditCode": false,
+      "canRunCommands": false,
+      "requiresApproval": false,
+      "quickLook": "diff",
+      "loopBack": {
+        "toStepId": "fix",
+        "maxRounds": 3
+      }
+    },
+    {
+      "agentId": "documentation-n-retro-agent",
+      "instructions": "Change documentation only: never source code or tests. Run a documentation-and-retro pass over this task's changes using the maintain-project-context skill. Store retro learnings in files (within the project or in the agent/skill file that executed this task), never in memory. Then handle every entry under \"Planning gaps raised this run\" in your prompt, if there is one: for each gap, reason about its root cause (why planning missed it, and what rule would have caught it). When the fix belongs to this project's own planning (a house rule the next planning session on this project should already know), write it into .docs/planning-notes.md right away (create it if missing; keep it a short, current list of rules grouped by topic, not a log of tasks), with no approval needed, the same as .docs/blueprint.md. Future planning sessions on this project read that file before they start. When the fix instead belongs in a shared Catalog Workflow step's instructions or in a Skill (used by every project, not just this one), do not apply it on your own: describe the exact proposed change and why it would have prevented the gap, ask the person directly in this session whether to apply it, and wait for their answer. Only after an explicit \"yes\" call update_workflow_step (workflow id, step id, the step's complete new instructions) or update_skill (skill id, the complete new SKILL.md body). On a \"no\", silence or an unclear reply, leave the shared definition unchanged and note the declined proposal in your summary. Your summary must list the docs you updated, the retro updates you made, and what you did about each planning gap.",
+      "skillIds": [
+        "maintain-project-context"
+      ],
+      "preloadSkillIds": [
+        "maintain-project-context"
+      ],
+      "id": "docs-and-retro",
+      "name": "Docs & Retro",
+      "canEditCode": true,
+      "canRunCommands": false,
+      "requiresApproval": false,
+      "quickLook": "documents"
+    }
+  ]
+}

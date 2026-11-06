@@ -1,0 +1,729 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gated Feature Pipeline — UI Review</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --surface:#ffffff; --surface-2:#f0f2f5; --border:#e2e5ea;
+    --text:#1c2029; --text-dim:#5b6472; --text-faint:#8a92a0;
+    --accent:#3457d5; --accent-weak:#e8edff;
+    --ok:#1f9254; --ok-weak:#e4f6ec;
+    --warn:#b6790a; --warn-weak:#fdf0dc;
+    --bad:#c22b3f; --bad-weak:#fbe6e9;
+    --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color-scheme: light dark;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#14161b; --surface:#1b1e25; --surface-2:#20242c; --border:#2b2f38;
+      --text:#e7e9ee; --text-dim:#a7adb9; --text-faint:#6f7684;
+      --accent:#7c94ff; --accent-weak:#22284a;
+      --ok:#57c98a; --ok-weak:#12291d;
+      --warn:#e0a53c; --warn-weak:#332508;
+      --bad:#f0697c; --bad-weak:#3a1419;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#14161b; --surface:#1b1e25; --surface-2:#20242c; --border:#2b2f38;
+    --text:#e7e9ee; --text-dim:#a7adb9; --text-faint:#6f7684;
+    --accent:#7c94ff; --accent-weak:#22284a;
+    --ok:#57c98a; --ok-weak:#12291d;
+    --warn:#e0a53c; --warn-weak:#332508;
+    --bad:#f0697c; --bad-weak:#3a1419;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--text); font-family:var(--sans); font-size:14px; line-height:1.5;}
+  img{max-width:100%;}
+  [hidden]{display:none!important;}
+
+  .wrap{max-width:1180px; margin:0 auto; padding:28px 20px 80px;}
+
+  header.page{margin-bottom:22px;}
+  header.page h1{font-size:21px; margin:0 0 4px; letter-spacing:-0.01em;}
+  header.page p{margin:0; color:var(--text-dim); max-width:78ch;}
+  .note{
+    margin-top:14px; padding:10px 14px; border-radius:8px; background:var(--accent-weak);
+    color:var(--text); border:1px solid var(--border); font-size:12.5px; max-width:86ch;
+  }
+  .note b{color:var(--accent);}
+  .note ul{margin:6px 0 0; padding-left:18px;}
+  .note li{margin-bottom:2px;}
+
+  /* ---------- layout ---------- */
+  .gate-layout{display:grid; grid-template-columns:250px 1fr; gap:18px;}
+  @media (max-width:760px){ .gate-layout{grid-template-columns:1fr;} }
+
+  .stepper{
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    padding:8px; align-self:start; position:sticky; top:12px;
+  }
+  .step{
+    display:flex; align-items:flex-start; gap:10px; padding:9px 8px; border-radius:8px;
+    cursor:pointer; width:100%; text-align:left; border:none; background:none; color:var(--text); font:inherit;
+  }
+  .step:hover{background:var(--surface-2);}
+  .step.selected{background:var(--accent-weak);}
+  .dot{
+    width:18px; height:18px; border-radius:50%; flex:none; margin-top:1px;
+    display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700;
+    background:var(--surface-2); color:var(--text-faint); border:1.5px solid var(--border);
+  }
+  .step.done .dot{background:var(--ok); border-color:var(--ok); color:#fff;}
+  .step.in-review .dot{border-color:var(--accent); color:var(--accent); background:var(--surface);}
+  .step.revision .dot{background:var(--warn); border-color:var(--warn); color:#fff;}
+  .step.needs-input .dot{border:1.5px dashed var(--accent); color:var(--accent); background:var(--surface);}
+  .step.queued .dot{border:1.5px dashed var(--border); color:var(--text-faint); background:var(--surface);}
+  .step.retro .dot{border:1.5px dashed var(--text-faint); color:var(--text-faint); background:var(--surface);}
+  .step .label{display:flex; flex-direction:column;}
+  .step .name{font-weight:600; font-size:13px;}
+  .step .sub{font-size:11px; color:var(--text-faint); margin-top:1px;}
+  .step.revision .sub{color:var(--warn);}
+  .step.needs-input .sub{color:var(--accent);}
+
+  .panel{background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px 22px;}
+  .panel-head{display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;}
+  .panel-head h2{margin:0 0 4px; font-size:17px;}
+  .panel-head .summary{color:var(--text-dim); margin:0; max-width:68ch;}
+  .badge{
+    font-size:11px; font-weight:700; padding:3px 9px; border-radius:99px; white-space:nowrap;
+    text-transform:uppercase; letter-spacing:.03em;
+  }
+  .badge.pending{background:var(--accent-weak); color:var(--accent);}
+  .badge.approved{background:var(--ok-weak); color:var(--ok);}
+  .badge.revision{background:var(--warn-weak); color:var(--warn);}
+  .badge.queued{background:var(--surface-2); color:var(--text-faint);}
+  .badge.autonomous{background:var(--surface-2); color:var(--text-dim); border:1px dashed var(--border);}
+  .badge.risk-high{background:var(--bad-weak); color:var(--bad);}
+  .badge.risk-med{background:var(--warn-weak); color:var(--warn);}
+  .badge.risk-low{background:var(--ok-weak); color:var(--ok);}
+
+  .ripple-banner{
+    margin:14px 0; padding:10px 14px; border-radius:8px; background:var(--warn-weak);
+    border:1px solid color-mix(in srgb, var(--warn) 40%, transparent); font-size:12.5px;
+  }
+  .ripple-banner b{color:var(--warn);}
+
+  /* pre-stage questions already answered, shown collapsed */
+  details.qa{margin:14px 0; border:1px solid var(--border); border-radius:10px; overflow:hidden;}
+  details.qa summary{
+    padding:9px 14px; cursor:pointer; font-weight:600; font-size:12px; background:var(--surface-2);
+    list-style:none; color:var(--text-dim);
+  }
+  details.qa summary::-webkit-details-marker{display:none;}
+  .qa-list{padding:4px 14px 12px;}
+  .qa-row{padding:7px 0; border-top:1px solid var(--border);}
+  .qa-row:first-child{border-top:none;}
+  .qa-row .q{font-weight:600; font-size:12.5px;}
+  .qa-row .a{color:var(--text-dim); font-size:12.5px; margin-top:2px;}
+  .qa-row .a:before{content:"→ "; color:var(--text-faint);}
+
+  /* needs-input form */
+  .qform{margin:16px 0; padding:14px 16px; border-radius:10px; border:1px dashed var(--accent); background:var(--accent-weak);}
+  .qform h3{margin:0 0 10px; font-size:12.5px; color:var(--accent); text-transform:uppercase; letter-spacing:.03em;}
+  .qf-item{margin-bottom:12px;}
+  .qf-item:last-child{margin-bottom:0;}
+  .qf-item label{display:block; font-size:13px; font-weight:600; margin-bottom:6px;}
+  .qf-item input[type=text]{
+    width:100%; border-radius:8px; border:1px solid var(--border); background:var(--surface);
+    color:var(--text); font:inherit; padding:9px 12px;
+  }
+
+  .items{list-style:none; margin:16px 0; padding:0; display:flex; flex-direction:column; gap:10px;}
+  .item{border:1px solid var(--border); border-radius:10px; padding:12px 14px; background:var(--surface-2);}
+  .item-top{display:flex; justify-content:space-between; gap:10px; align-items:flex-start;}
+  .item-top .txt{font-weight:600; font-size:13px;}
+  .item-desc{color:var(--text-dim); font-size:12.5px; margin-top:4px;}
+
+  /* in-review open questions */
+  .rq{border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-bottom:10px; background:var(--surface-2);}
+  .rq .rq-q{font-weight:600; font-size:13px; margin-bottom:8px;}
+  .item-options{display:flex; gap:6px; flex-wrap:wrap;}
+  .chip{
+    font-size:11.5px; padding:5px 12px; border-radius:99px; border:1px solid var(--border);
+    background:var(--surface); color:var(--text-dim); cursor:pointer; font:inherit;
+  }
+  .chip:hover{border-color:var(--accent);}
+  .chip.chosen{border-color:var(--accent); color:var(--accent); background:var(--accent-weak); font-weight:600;}
+
+  /* wireframe (UX artifact) */
+  .wireframe{border:1px solid var(--border); border-radius:10px; padding:16px; background:var(--surface); max-width:360px;}
+  .wf-topbar{display:flex; align-items:center; gap:8px; margin-bottom:14px;}
+  .wf-dot{width:10px; height:10px; border-radius:50%; background:var(--border);}
+  .wf-line{height:8px; border-radius:4px; background:var(--surface-2); border:1px solid var(--border);}
+  .wf-line.w40{width:40%;} .wf-line.w50{width:50%;} .wf-line.w60{width:60%;}
+  .wf-line.w70{width:70%;} .wf-line.w80{width:80%;} .wf-line.w90{width:90%;}
+  .wf-line.tall{height:14px; margin-bottom:10px;}
+  .wf-body .wf-line{margin-bottom:8px;}
+  .wf-btn{
+    display:inline-block; font-size:11px; font-weight:700; padding:6px 14px; border-radius:8px;
+    background:var(--bad-weak); color:var(--bad); border:1px solid color-mix(in srgb, var(--bad) 40%, transparent);
+    margin-top:4px; margin-right:8px;
+  }
+  .wf-btn.small{padding:5px 11px; font-size:10.5px;}
+  .wf-btn.primary{background:var(--accent); color:#fff; border-color:var(--accent);}
+  .wf-dropdown{
+    display:inline-block; font-size:11px; padding:6px 12px; border-radius:8px; border:1px solid var(--border);
+    background:var(--surface-2); color:var(--text-dim);
+  }
+  .wf-modal{margin-top:14px; padding:12px; border-radius:8px; border:1px dashed var(--border); background:var(--surface-2);}
+  .wf-modal-actions{display:flex; gap:8px; margin-top:8px;}
+  .wf-caption{font-size:11.5px; color:var(--text-faint); margin:10px 0 0; max-width:360px;}
+
+  /* architecture diagram */
+  .diagram{display:flex; align-items:center; gap:8px; flex-wrap:wrap; overflow-x:auto; padding:4px 0;}
+  .dnode{
+    border:1px solid var(--border); border-radius:10px; padding:10px 14px; background:var(--surface);
+    font-size:12px; font-weight:600; white-space:nowrap;
+  }
+  .dnode span{display:block; font-weight:400; color:var(--text-faint); font-size:10.5px; margin-top:2px;}
+  .dnode.new{border-color:var(--accent); background:var(--accent-weak); color:var(--accent);}
+  .dnode.ext{border-style:dashed; color:var(--text-dim);}
+  .darrow{color:var(--text-faint); font-size:16px; flex:none;}
+
+  details.artifact{margin-top:16px; border:1px solid var(--border); border-radius:10px; overflow:hidden;}
+  details.artifact summary{
+    padding:10px 14px; cursor:pointer; font-weight:600; font-size:12.5px; background:var(--surface-2);
+    list-style:none; display:flex; align-items:center; gap:8px;
+  }
+  details.artifact summary::-webkit-details-marker{display:none;}
+  details.artifact summary:before{content:"▸"; color:var(--text-faint); transition:transform .15s;}
+  details.artifact[open] summary:before{transform:rotate(90deg);}
+  pre.diff{margin:0; padding:14px 16px; font-family:var(--mono); font-size:12px; overflow-x:auto; background:var(--surface); line-height:1.6;}
+  pre.diff .add{color:var(--ok); display:block;}
+  pre.diff .rem{color:var(--bad); display:block;}
+  pre.diff .ctx{color:var(--text-faint); display:block;}
+
+  .comment-box{margin-top:16px;}
+  .comment-box label{display:block; font-size:12px; font-weight:600; color:var(--text-dim); margin-bottom:6px;}
+  .comment-box textarea{
+    width:100%; min-height:64px; resize:vertical; border-radius:8px; border:1px solid var(--border);
+    background:var(--surface); color:var(--text); font:inherit; padding:10px 12px;
+  }
+  .actions{display:flex; gap:8px; margin-top:16px; flex-wrap:wrap; align-items:center;}
+  .btn{font:inherit; font-weight:700; font-size:12.5px; padding:9px 16px; border-radius:8px; cursor:pointer; border:1px solid transparent;}
+  .btn.approve{background:var(--ok); color:#fff;}
+  .btn.changes{background:var(--warn-weak); color:var(--warn); border-color:color-mix(in srgb, var(--warn) 40%, transparent);}
+  .btn:active{transform:translateY(1px);}
+  .btn:disabled{opacity:.5; cursor:not-allowed;}
+  .action-hint{font-size:11.5px; color:var(--text-faint);}
+  .toast{margin-top:12px; font-size:12px; padding:8px 12px; border-radius:8px; background:var(--ok-weak); color:var(--ok); display:none;}
+  .toast.show{display:block;}
+
+  .queued-note{
+    margin-top:8px; padding:22px; border-radius:10px; border:1px dashed var(--border); background:var(--surface-2);
+    color:var(--text-dim); font-size:13px; text-align:center;
+  }
+
+  .running{display:flex; align-items:center; gap:10px; padding:14px 16px; border-radius:10px; background:var(--surface-2); border:1px solid var(--border); margin-top:14px;}
+  .spinner{width:16px; height:16px; border-radius:50%; border:2px solid var(--border); border-top-color:var(--accent); animation:spin .8s linear infinite; flex:none;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  .timeline{margin-top:22px; border-top:1px solid var(--border); padding-top:14px;}
+  .timeline h3{font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-faint); margin:0 0 10px;}
+  .tl-row{display:flex; gap:10px; font-size:12.5px; padding:6px 0; color:var(--text-dim);}
+  .tl-row .t{color:var(--text-faint); font-family:var(--mono); font-size:11px; flex:none; width:64px;}
+
+  /* retro (final stage) */
+  .retro-grid{display:grid; grid-template-columns:1fr 320px; gap:18px; margin-top:16px;}
+  @media (max-width:820px){ .retro-grid{grid-template-columns:1fr;} }
+  .chat{display:flex; flex-direction:column; gap:10px; max-height:360px; overflow-y:auto; padding-right:4px;}
+  .msg{max-width:88%; padding:9px 12px; border-radius:12px; font-size:12.5px;}
+  .msg.user{align-self:flex-end; background:var(--accent); color:#fff; border-bottom-right-radius:3px;}
+  .msg.agent{align-self:flex-start; background:var(--surface-2); border:1px solid var(--border); border-bottom-left-radius:3px;}
+  .chat-input{display:flex; gap:8px; margin-top:12px;}
+  .chat-input input{flex:1; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font:inherit; padding:9px 12px;}
+  .chat-input button{border:none; background:var(--accent); color:#fff; font-weight:700; font-size:12.5px; padding:0 14px; border-radius:8px; cursor:pointer;}
+  .diff-file{border:1px solid var(--border); border-radius:10px; overflow:hidden; margin-bottom:12px;}
+  .diff-file summary{padding:9px 13px; background:var(--surface-2); font-family:var(--mono); font-size:12px; cursor:pointer; display:flex; justify-content:space-between; list-style:none;}
+  .diff-file summary::-webkit-details-marker{display:none;}
+  .diff-stat{color:var(--text-faint); font-family:var(--sans);}
+  .diff-stat .add{color:var(--ok); font-weight:700;}
+  .diff-stat .rem{color:var(--bad); font-weight:700;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page">
+    <h1>Gated Feature Pipeline — Gate review</h1>
+    <p>One stepper, one panel. Only stages where a human actually decides something get a slot — everything the pipeline does autonomously is bundled behind a single review.</p>
+    <div class="note">
+      <b>What changed from the last pass</b>
+      <ul>
+        <li>Implement, Test and Code review are folded into one <b>Dev</b> stage — autonomous end to end, one gate when it's done.</li>
+        <li><b>Retro</b> is the pipeline's last stage in this same stepper, not a separate tab — it starts automatically the moment Dev above is approved, runs asynchronously (never blocks what Dev already shipped), and its proposal is split into two independently-approvable sections: project-level and global (<code>catalog/</code>).</li>
+        <li>The old "Revision ripple" and "Backend model" tabs are gone — they were explaining mechanics, not showing UI. That reasoning now lives in chat, not this doc.</li>
+        <li>Every stage can carry pre-stage questions (asked before the agent drafts anything) and, separately, open questions left <i>inside</i> a review — try Architecture below.</li>
+      </ul>
+    </div>
+  </header>
+
+  <div class="gate-layout">
+    <div class="stepper" id="stepper"></div>
+    <div class="panel" id="gate-panel"></div>
+  </div>
+
+</div>
+
+<script>
+  const stages = [
+    {
+      id:'elaborate', name:'Elaborate', status:'done',
+      preQuestions:[
+        {q:"What's the max refund amount allowed without manager approval?", a:'$50 per order'},
+        {q:'Should partial refunds be supported in v1?', a:'No — full order amount only'},
+        {q:'Is there an existing refund flow to deprecate?', a:'No, this is net-new'},
+      ],
+      summary:'Self-serve refunds up to $50, full order only, no manager approval needed under that threshold.',
+      items:[
+        {txt:'In scope: self-serve full refund ≤ $50 from the order detail page', desc:'Customer-initiated, no support agent involvement.', risk:'low'},
+        {txt:'In scope: confirmation email on refund completion', desc:'Reuses the existing transactional email templates.', risk:'low'},
+        {txt:'Out of scope: partial refunds', desc:'Explicitly deferred — flagged as a v2 candidate.', risk:'low'},
+        {txt:'Out of scope: refunds over $50', desc:'Stays on the existing manual support queue, unchanged.', risk:'med'},
+      ],
+    },
+    {
+      id:'ux', name:'UX / UI', status:'done',
+      preQuestions:[{q:'Where should the refund entry point live — order detail page or a dedicated refunds tab?', a:'Order detail page, next to the order summary'}],
+      summary:"Refund button on the order detail page opens a reason dropdown, then a confirmation modal before anything is submitted.",
+      wireframe:true,
+      items:[
+        {txt:'Entry point: "Refund" button under the order total', desc:'Only rendered for eligible orders (paid, ≤ $50, not already refunded).', risk:'low'},
+        {txt:'Reason field is required', desc:'Dropdown, not free text — feeds the reporting taxonomy decided at the DB Schema stage.', risk:'low'},
+        {txt:'Confirmation modal restates amount + reason before submit', desc:'No silent one-click refunds.', risk:'med'},
+      ],
+    },
+    {
+      id:'architecture', name:'Architecture', status:'in-review',
+      preQuestions:[{q:'Does this need a new microservice, or can it extend the existing PaymentGateway adapter?', a:'Extend the existing adapter — no new service'}],
+      summary:'A new RefundService sits behind the existing PaymentGateway adapter; no new external dependency.',
+      diagram:true,
+      items:[
+        {txt:'New: RefundService', desc:'Thin domain service — validates eligibility, then calls the existing adapter.', risk:'low'},
+        {txt:'Reused: PaymentGateway adapter', desc:'Already wraps Stripe; adding a `refund()` method alongside the existing `charge()`.', risk:'low'},
+      ],
+      reviewQuestions:[
+        {id:'idem', q:'Should refund requests carry an idempotency key to guard against accidental double-submits?', options:['Yes, add one now','No, out of scope for v1'], a:null},
+      ],
+    },
+    {
+      id:'schema', name:'DB Schema', status:'revision',
+      reason:'Implement stage found the refund flow needs a free-text reason, not modeled in the current schema.',
+      from:'Dev · session dev-8f2a',
+      preQuestions:[{q:'Do we need to track refund reason for reporting, or just store the refund itself?', a:'Yes — reporting needs it broken out by reason'}],
+      summary:'Revised: add a nullable refund_reason column to orders, plus a refund_reason_code enum for reporting.',
+      items:[
+        {txt:'New column: orders.refund_reason', desc:'Nullable text, default NULL — no backfill needed for existing rows.', risk:'low'},
+        {txt:'New column: orders.refund_reason_code', desc:"Enum(customer_request, duplicate_charge, service_issue). Feeds the analytics dashboard, not the refund logic itself.", risk:'med'},
+      ],
+      artifact:{title:'Migration snippet (generated)', code:
+`-- migrations/2026_09_17_add_refund_reason.sql
+ALTER TABLE orders ADD COLUMN refund_reason text;
+ALTER TABLE orders ADD COLUMN refund_reason_code varchar(32);
+-- no backfill: both columns are nullable, existing rows unaffected`},
+    },
+    {
+      id:'migration', name:'Data migration', status:'queued',
+      queuedNote:"Waiting on the DB Schema revision above — this stage regenerates its plan once that's approved.",
+    },
+    {
+      id:'dev', name:'Dev (Implement + Test + Review)', status:'needs-input',
+      preQuestions:[{q:'Any edge cases beyond the happy path you want explicitly tested?', a:null, placeholder:'e.g. refund attempted twice on the same order, refund on an already-cancelled order'}],
+      autonomous:true,
+      devResult:{
+        summary:'RefundService implemented, tested, and self-reviewed — no gates in between, one summary now that it’s done.',
+        items:[
+          {txt:'6 files changed', desc:'RefundService, PaymentGateway adapter, order-detail route, 2 UI components, 1 email template.', risk:'low'},
+          {txt:'14 tests added — 100% coverage on new code', desc:'Happy path, over-limit rejection, already-refunded order, and the edge case you specified above.', risk:'low'},
+          {txt:'Code review: 2 findings, both auto-fixed', desc:'Missing null check on refund_reason, inconsistent naming (refundAmt → refundAmount).', risk:'low'},
+        ],
+        artifact:{title:'Diff summary', code:
+`+ server/services/RefundService.ts        (+142)
++ server/services/PaymentGateway.ts        (+38 -2)
++ web/src/ui/OrderDetail/RefundButton.tsx  (+51)
++ web/src/ui/OrderDetail/RefundModal.tsx   (+87)
+~ server/emails/templates/refund.html      (+12 -1)
++ server/services/RefundService.test.ts    (+164)`},
+      },
+    },
+    {
+      id:'retro', name:'Retro', status:'retro-preview',
+      retro:{
+        trigger:'Automatically started the moment Dev above was approved. Runs asynchronously — the feature already shipped; this doesn’t block anything, and it’s queued FIFO behind any other project’s pending retro since it can touch the same shared catalog/.',
+        summary:'Proposes changes at two different scopes — this project’s own docs, and agent-visual-os’s shared catalog/ — based on patterns in this run’s gate history. Nothing has been written to disk yet. Each section below is approved or sent back independently.',
+        why:[
+          'Both linked bugs trace back to DB Schema gates approved without a stated column default.',
+          'The gate-payload schema never required one, so nothing forced the agent to surface it.',
+          "Fix targets the schema and the reviewer checklist together so the gap can't reopen from either side.",
+        ],
+        chat:[
+          {who:'agent', text:'Proposed a project-level decision-log entry plus two catalog diffs based on BUG-142 and BUG-156. Want me to adjust scope before you approve either section?'},
+          {who:'user', text:"Also add a one-line example to the skill so the field isn't ambiguous."},
+          {who:'agent', text:'Added an example line (defaultValue: "pending") to the SKILL.md diff and regenerated it — same file, now +4/-0.'},
+        ],
+        sections:{
+          project:{
+            label:'Project-level changes', scopeNote:'This project only — applies immediately on approval, independent of the section below.', status:'pending',
+            diffs:[
+              {path:'.docs/decision-log.md', add:5, rem:0, code:
+`@@ Decisions @@
++### 2026-09-17 — Always state a column's default in the migration doc
++BUG-142 and BUG-156 both shipped a nullable column whose intended
++default was only in someone's head. From now on this project's own
++DB Schema gates must state defaultValue explicitly, even when it's
++just \`null\`.`},
+            ],
+          },
+          global:{
+            label:'Global changes (catalog/)', scopeNote:'Shared across every project — this is the section that goes through the FIFO queue.', status:'pending',
+            diffs:[
+              {path:'catalog/agents/db-migration-reviewer.md', add:6, rem:1, code:
+`@@ Checklist @@
+- Confirm the migration is reversible.
+-- Confirm indexes on new foreign keys.
++- Confirm indexes on new foreign keys.
++- Confirm every new nullable column has an explicit default noted
++  in the migration doc — 2 of the last 3 bugs were "column added
++  but backfill assumed a default that was never written down."`},
+              {path:'catalog/skills/gate-payload/SKILL.md', add:4, rem:0, code:
+`@@ Decision item schema @@
++Each schema-change decision item must include a \`defaultValue\`
++field (or explicit \`null\`) — leaving it out was the root cause
++behind BUG-142 and BUG-156. Example: defaultValue: "pending"`},
+            ],
+          },
+        },
+      },
+    },
+  ];
+
+  let selected = 'schema';
+
+  function stageDotSymbol(s){
+    if(s.status==='done') return '✓';
+    if(s.status==='revision') return '!';
+    if(s.status==='in-review') return '●';
+    if(s.status==='needs-input') return '?';
+    if(s.status==='retro-preview') return '↺';
+    return '';
+  }
+  function stageSub(s){
+    if(s.status==='done') return 'Approved';
+    if(s.status==='revision') return 'Revision needs review';
+    if(s.status==='in-review') return 'Needs review';
+    if(s.status==='needs-input') return 'Answer questions to start';
+    if(s.status==='running') return 'Running autonomously…';
+    if(s.status==='retro-preview') return 'Auto-started, running async';
+    return 'Not started';
+  }
+
+  function renderStepper(){
+    const el = document.getElementById('stepper');
+    el.innerHTML = stages.map(s=>{
+      const cls = ['step', s.status==='retro-preview' ? 'retro' : (s.status==='queued' ? 'queued' : s.status)];
+      if(s.id===selected) cls.push('selected');
+      return `<button class="${cls.join(' ')}" onclick="selectStage('${s.id}')">
+        <span class="dot">${stageDotSymbol(s)}</span>
+        <span class="label"><span class="name">${s.name}</span><span class="sub">${stageSub(s)}</span></span>
+      </button>`;
+    }).join('');
+  }
+
+  function selectStage(id){ selected = id; renderStepper(); renderPanel(); }
+
+  function badgeFor(s){
+    if(s.status==='done') return '<span class="badge approved">approved</span>';
+    if(s.status==='revision') return '<span class="badge revision">revision pending</span>';
+    if(s.status==='in-review') return '<span class="badge pending">needs review</span>';
+    if(s.status==='needs-input') return '<span class="badge pending">needs your input</span>';
+    if(s.status==='running') return '<span class="badge autonomous">running…</span>';
+    if(s.status==='queued') return '<span class="badge queued">not started</span>';
+    if(s.status==='retro-preview') return '<span class="badge autonomous">auto-triggered</span>';
+    return '';
+  }
+
+  function qaBlock(s){
+    if(!s.preQuestions || !s.preQuestions.length) return '';
+    return `<details class="qa">
+        <summary>Questions answered before this stage started (${s.preQuestions.length})</summary>
+        <div class="qa-list">${s.preQuestions.map(q=>`<div class="qa-row"><div class="q">${q.q}</div><div class="a">${q.a}</div></div>`).join('')}</div>
+      </details>`;
+  }
+
+  function itemsBlock(items){
+    if(!items) return '';
+    return `<ul class="items">${items.map(it=>`
+      <li class="item">
+        <div class="item-top"><span class="txt">${it.txt}</span>${it.risk?`<span class="badge risk-${it.risk}">${it.risk} risk</span>`:''}</div>
+        <div class="item-desc">${it.desc}</div>
+      </li>`).join('')}</ul>`;
+  }
+
+  function artifactBlock(a){
+    if(!a) return '';
+    return `<details class="artifact"><summary>${a.title}</summary><pre class="diff">${a.code}</pre></details>`;
+  }
+
+  function wireframeBlock(){
+    return `<div class="wireframe">
+        <div class="wf-topbar"><div class="wf-dot"></div><div class="wf-line w60"></div></div>
+        <div class="wf-body">
+          <div class="wf-line w40 tall"></div>
+          <div class="wf-line w80"></div>
+          <div class="wf-line w70"></div>
+          <div><span class="wf-btn">Refund</span><span class="wf-dropdown">Reason ▾</span></div>
+        </div>
+        <div class="wf-modal">
+          <div class="wf-line w50"></div>
+          <div class="wf-line w90"></div>
+          <div class="wf-modal-actions"><span class="wf-btn small">Cancel</span><span class="wf-btn small primary">Confirm refund</span></div>
+        </div>
+      </div>
+      <p class="wf-caption">Order detail page → Refund button → reason dropdown → confirmation modal restating amount + reason.</p>`;
+  }
+
+  function diagramBlock(){
+    return `<div class="diagram">
+        <div class="dnode">Order detail UI</div><div class="darrow">→</div>
+        <div class="dnode new">RefundService<span>new</span></div><div class="darrow">→</div>
+        <div class="dnode">PaymentGateway adapter<span>existing</span></div><div class="darrow">→</div>
+        <div class="dnode ext">Stripe API<span>external</span></div>
+      </div>`;
+  }
+
+  function reviewQuestionsBlock(s){
+    if(!s.reviewQuestions || !s.reviewQuestions.length) return '';
+    return s.reviewQuestions.map(q=>`
+      <div class="rq">
+        <div class="rq-q">${q.q}</div>
+        <div class="item-options">
+          ${q.options.map(opt=>`<button class="chip ${q.a===opt?'chosen':''}" onclick="answerReviewQuestion('${s.id}','${q.id}', this)">${opt}</button>`).join('')}
+        </div>
+      </div>`).join('');
+  }
+
+  function answerReviewQuestion(stageId, qid, btn){
+    const s = stages.find(x=>x.id===stageId);
+    const q = s.reviewQuestions.find(x=>x.id===qid);
+    q.a = btn.textContent;
+    renderPanel();
+  }
+
+  function hasUnansweredQuestions(s){
+    return !!(s.reviewQuestions && s.reviewQuestions.some(q=>!q.a));
+  }
+
+  function renderActionRow(s){
+    const row = document.getElementById('action-row');
+    if(!row) return;
+    if(hasUnansweredQuestions(s)){
+      row.innerHTML = `<button class="btn approve" onclick="submitAnswers('${s.id}')">Submit</button>
+        <span class="action-hint">Answer every open question above to continue.</span>`;
+      return;
+    }
+    const ta = document.getElementById('comment-'+s.id);
+    const hasComment = ta && ta.value.trim().length > 0;
+    if(hasComment){
+      row.innerHTML = `<button class="btn changes" onclick="decide('${s.id}','changes')">Request changes</button>`;
+    } else {
+      row.innerHTML = `<button class="btn approve" onclick="decide('${s.id}','approve')">Approve</button>`;
+    }
+  }
+
+  function submitAnswers(stageId){
+    const s = stages.find(x=>x.id===stageId);
+    if(hasUnansweredQuestions(s)) return;
+    s.status = 'done';
+    renderStepper(); renderPanel();
+  }
+
+  function decide(stageId, kind){
+    const s = stages.find(x=>x.id===stageId);
+    s.status = 'done';
+    renderStepper(); renderPanel();
+    const idx = stages.findIndex(x=>x.id===stageId);
+    const toast = document.getElementById('toast');
+    if(toast){
+      toast.textContent = kind==='approve' ? '✓ Approved — advancing to the next stage.' : '↺ Sent back with your comment — this stage will reopen once revised.';
+      toast.classList.add('show');
+    }
+  }
+
+  function startDev(stageId){
+    const s = stages.find(x=>x.id===stageId);
+    const input = document.getElementById('q-dev-edge');
+    s.preQuestions = [{q:s.preQuestions[0].q, a: (input.value.trim() || '(none specified)')}];
+    s.status = 'running';
+    renderStepper(); renderPanel();
+    setTimeout(()=>{
+      s.status = 'in-review';
+      s.summary = s.devResult.summary;
+      s.items = s.devResult.items;
+      s.artifact = s.devResult.artifact;
+      renderStepper(); renderPanel();
+    }, 1200);
+  }
+
+  function renderPanel(){
+    const s = stages.find(x=>x.id===selected);
+    const panel = document.getElementById('gate-panel');
+
+    if(s.status==='queued'){
+      panel.innerHTML = `<div class="panel-head"><div><h2>${s.name}</h2></div>${badgeFor(s)}</div>
+        <div class="queued-note">${s.queuedNote}</div>`;
+      return;
+    }
+
+    if(s.status==='needs-input'){
+      panel.innerHTML = `<div class="panel-head"><div><h2>${s.name}</h2><p class="summary">Answer this before the agent drafts anything for this stage.</p></div>${badgeFor(s)}</div>
+        <div class="qform">
+          <h3>Before this stage starts</h3>
+          <div class="qf-item">
+            <label>${s.preQuestions[0].q}</label>
+            <input type="text" id="q-dev-edge" placeholder="${s.preQuestions[0].placeholder||''}" />
+          </div>
+        </div>
+        <div class="actions"><button class="btn approve" onclick="startDev('${s.id}')">Submit</button></div>`;
+      return;
+    }
+
+    if(s.status==='running'){
+      panel.innerHTML = `<div class="panel-head"><div><h2>${s.name}</h2><p class="summary">Implement → Test → Code review, running autonomously. No gates in between — you'll see one summary when it's done.</p></div>${badgeFor(s)}</div>
+        <div class="running"><div class="spinner"></div><span>Working…</span></div>`;
+      return;
+    }
+
+    if(s.status==='retro-preview'){
+      const r = s.retro;
+      panel.innerHTML = `<div class="panel-head">
+          <div><h2>${s.name}</h2><p class="summary">${r.trigger}</p><p class="summary">${r.summary}</p></div>
+          ${badgeFor(s)}
+        </div>
+        <div class="retro-grid">
+          <div>
+            ${retroSectionBlock('project', r.sections.project)}
+            ${retroSectionBlock('global', r.sections.global)}
+            <h3 style="font-size:12px; text-transform:uppercase; letter-spacing:.03em; color:var(--text-faint); margin:16px 0 10px;">Why</h3>
+            <ul class="items">${r.why.map(w=>`<li class="item"><div class="item-desc">${w}</div></li>`).join('')}</ul>
+          </div>
+          <div>
+            <h3 style="font-size:12px; text-transform:uppercase; letter-spacing:.03em; color:var(--text-faint); margin:16px 0 10px;">Chat with the retro agent</h3>
+            <div class="chat" id="retro-chat">${r.chat.map(m=>`<div class="msg ${m.who}">${m.text}</div>`).join('')}</div>
+            <div class="chat-input"><input type="text" placeholder="Ask for another tweak before approving…" onkeydown="if(event.key==='Enter') sendRetroMsg()"><button type="button" onclick="sendRetroMsg()">Send</button></div>
+          </div>
+        </div>
+        <div class="toast" id="toast"></div>`;
+      renderRetroActionRow('project');
+      renderRetroActionRow('global');
+      return;
+    }
+
+    // done / in-review / revision
+    let html = `<div class="panel-head">
+        <div><h2>${s.name}</h2><p class="summary">${s.summary}</p></div>
+        ${badgeFor(s)}
+      </div>`;
+
+    if(s.reason){
+      html += `<div class="ripple-banner"><b>Revised because</b> — ${s.reason}<br><span style="color:var(--text-faint);">Requested by: ${s.from}</span></div>`;
+    }
+
+    html += qaBlock(s);
+
+    if(s.wireframe) html += wireframeBlock();
+    if(s.diagram) html += diagramBlock();
+
+    html += itemsBlock(s.items);
+    html += reviewQuestionsBlock(s);
+    html += artifactBlock(s.artifact);
+
+    if(s.status!=='done'){
+      html += `<div class="comment-box">
+          <label>Comment</label>
+          <textarea id="comment-${s.id}" placeholder="Leave empty to approve as-is, or write what needs to change…" oninput="renderActionRow(stages.find(x=>x.id==='${s.id}'))"></textarea>
+        </div>
+        <div class="actions" id="action-row"></div>
+        <div class="toast" id="toast"></div>`;
+    }
+
+    html += `<div class="timeline">
+        <h3>Gate history — this stage</h3>
+        <div class="tl-row"><span class="t">09:14</span> Stage session started, artifact drafted.</div>
+        <div class="tl-row"><span class="t">09:22</span> First gate opened — approved, no comments.</div>
+        ${s.reason ? '<div class="tl-row"><span class="t">11:47</span> Upstream revision requested by Dev — session resumed.</div><div class="tl-row"><span class="t">11:52</span> Revised artifact ready — new gate opened.</div>' : ''}
+      </div>`;
+
+    panel.innerHTML = html;
+    if(s.status!=='done') renderActionRow(s);
+  }
+
+  function sendRetroMsg(){
+    const input = document.querySelector('.chat-input input');
+    if(!input.value.trim()) return;
+    const chat = document.getElementById('retro-chat');
+    const u = document.createElement('div'); u.className='msg user'; u.textContent = input.value;
+    chat.appendChild(u);
+    input.value = '';
+    chat.scrollTop = chat.scrollHeight;
+    setTimeout(()=>{
+      const a = document.createElement('div'); a.className='msg agent';
+      a.textContent = 'Noted — updated the proposed diff above to reflect that.';
+      chat.appendChild(a);
+      chat.scrollTop = chat.scrollHeight;
+    }, 500);
+  }
+
+  function retroSectionBlock(kind, sec){
+    const decided = sec.status !== 'pending';
+    const statusBadge = sec.status==='approved' ? '<span class="badge approved">applied</span>'
+      : sec.status==='changes-requested' ? '<span class="badge revision">changes requested</span>'
+      : '';
+    return `<div style="margin-bottom:20px;">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:2px;">
+          <h3 style="font-size:12px; text-transform:uppercase; letter-spacing:.03em; color:var(--text-faint); margin:16px 0 4px;">${sec.label}</h3>
+          ${statusBadge}
+        </div>
+        <p style="font-size:11.5px; color:var(--text-faint); margin:0 0 10px;">${sec.scopeNote}</p>
+        ${sec.diffs.map(d=>`<details class="diff-file" open>
+            <summary>${d.path} <span class="diff-stat"><span class="add">+${d.add}</span> <span class="rem">-${d.rem}</span></span></summary>
+            <pre class="diff">${d.code}</pre>
+          </details>`).join('')}
+        ${decided ? '' : `
+          <div class="comment-box">
+            <textarea id="retro-comment-${kind}" placeholder="Leave empty to approve this section as-is, or write what needs to change…" oninput="renderRetroActionRow('${kind}')"></textarea>
+          </div>
+          <div class="actions" id="retro-action-${kind}"></div>`}
+      </div>`;
+  }
+
+  function renderRetroActionRow(kind){
+    const row = document.getElementById('retro-action-'+kind);
+    if(!row) return;
+    const ta = document.getElementById('retro-comment-'+kind);
+    const hasComment = ta && ta.value.trim().length > 0;
+    row.innerHTML = hasComment
+      ? `<button class="btn changes" onclick="decideRetroSection('${kind}','changes-requested')">Request changes</button>`
+      : `<button class="btn approve" onclick="decideRetroSection('${kind}','approved')">Approve</button>`;
+  }
+
+  function decideRetroSection(kind, status){
+    const r = stages.find(x=>x.id==='retro').retro;
+    r.sections[kind].status = status;
+    renderPanel();
+    const t = document.getElementById('toast');
+    t.textContent = status==='approved'
+      ? `✓ ${r.sections[kind].label} applied${kind==='global' ? ' — released from the FIFO queue' : ''}.`
+      : `↺ ${r.sections[kind].label} sent back — this section only, the other is unaffected.`;
+    t.classList.add('show');
+  }
+
+  renderStepper();
+  renderPanel();
+</script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "about": "Rename cases shared by server/tests/videoPure.test.ts (parseRename) and web/tests/contentVideo.test.mjs (renameError), so the two rule sets cannot drift. Every case keeps the current file's extension (.png); others are the Concept's other names.",
+  "others": ["taken.png", "Other File.png"],
+  "cases": [
+    { "base": "logo", "valid": true },
+    { "base": "My logo_v2-final", "valid": true },
+    { "base": "a", "valid": true },
+    { "base": "  spaced  ", "valid": true },
+    { "base": "with.dots.inside", "valid": true },
+    { "base": "", "valid": false },
+    { "base": "   ", "valid": false },
+    { "base": "a/b", "valid": false },
+    { "base": "a\\b", "valid": false },
+    { "base": "a:b", "valid": false },
+    { "base": "café", "valid": false },
+    { "base": "emoji😀", "valid": false },
+    { "base": ".hidden", "valid": false },
+    { "base": "TAKEN", "valid": false },
+    { "base": "other file", "valid": false },
+    { "base": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "valid": true },
+    { "base": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "valid": false }
+  ]
+}

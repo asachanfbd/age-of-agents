@@ -1,0 +1,34 @@
+{
+  "executors": [
+    {
+      "id": "test-claude-cli",
+      "label": "Test Claude CLI",
+      "kind": "claude-cli",
+      "bin": "agent-visual-os-test-claude-cli-does-not-exist",
+      "env": {}
+    },
+    {
+      "id": "test-claude-cli-alt",
+      "label": "Test Claude CLI (alt account)",
+      "kind": "claude-cli",
+      "bin": "claude-alt",
+      "env": {
+        "CLAUDE_CONFIG_DIR": "/tmp/does-not-matter"
+      }
+    },
+    {
+      "id": "test-codex-cli",
+      "label": "Test Codex CLI",
+      "kind": "codex-cli",
+      "bin": "agent-visual-os-test-codex-cli-does-not-exist",
+      "env": {}
+    },
+    {
+      "id": "test-unsupported",
+      "label": "Unsupported",
+      "kind": "unsupported",
+      "bin": "unused",
+      "env": {}
+    }
+  ]
+}

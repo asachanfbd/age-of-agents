@@ -1,0 +1,19 @@
+{
+  "_comment": "Copy this to executors.json (git-ignored — it names real local paths/accounts) and edit for your machine. Each entry is one way to invoke an agent CLI as a real interactive session; workerManager picks one per Task. Only 'claude-cli'/'codex-cli' are supported kinds — every Task now runs as an interactive CLI session (see docs/architecture.md).",
+  "executors": [
+    {
+      "id": "claude-cli-default",
+      "label": "Claude CLI (no login)",
+      "kind": "claude-cli",
+      "bin": "claude",
+      "env": {}
+    },
+    {
+      "id": "codex-cli",
+      "label": "Codex CLI",
+      "kind": "codex-cli",
+      "bin": "codex",
+      "env": {}
+    }
+  ]
+}

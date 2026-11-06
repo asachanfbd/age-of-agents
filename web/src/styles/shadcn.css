@@ -1,0 +1,375 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource/outfit/400.css";
+@import "@fontsource/outfit/500.css";
+@import "@fontsource/outfit/600.css";
+@import "@fontsource/outfit/700.css";
+
+/* Tailwind v4's class-based dark mode: a `dark:` utility applies when an ancestor carries
+ * `.dark` — toggled by initThemeClassSync() in lib/uiTheme.ts, not by prefers-color-scheme
+ * alone, so it can follow the app's own theme preference (light/dark/system/daytime). */
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * The app's one token set: a warm cream canvas, white cards, a charcoal primary and four stage
+ * accents, defined once below for light (`:root`) and dark (`.dark`). Every surface reads these
+ * through the Tailwind utilities mapped in `@theme inline` (`bg-card`, `text-muted-foreground`,
+ * `bg-stage-green` ...); the HUD variables in index.css alias them.
+ *
+ * The raw custom properties are named `--sc-*` rather than the bare shadcn names so they cannot
+ * collide with other stylesheets that share `:root`.
+ *
+ * `--sc-<status>-foreground` is the status' text colour: readable on the card and on a tint of the
+ * status colour (`bg-success/15 text-success-foreground`). `--sc-stage-<name>-foreground` is the text
+ * colour on a card filled with that stage colour.
+ */
+/* `static` keeps the font variables on :root even when no utility uses them: index.css reads them directly. */
+@theme static {
+  --font-sans: 'Outfit', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+@theme inline {
+  --color-background: var(--sc-background);
+  --color-foreground: var(--sc-foreground);
+  --color-card: var(--sc-card);
+  --color-card-foreground: var(--sc-card-foreground);
+  --color-popover: var(--sc-popover);
+  --color-popover-foreground: var(--sc-popover-foreground);
+  --color-primary: var(--sc-primary);
+  --color-primary-foreground: var(--sc-primary-foreground);
+  --color-secondary: var(--sc-secondary);
+  --color-secondary-foreground: var(--sc-secondary-foreground);
+  --color-muted: var(--sc-muted);
+  --color-muted-foreground: var(--sc-muted-foreground);
+  --color-accent: var(--sc-accent);
+  --color-accent-foreground: var(--sc-accent-foreground);
+  --color-destructive: var(--sc-destructive);
+  --color-destructive-foreground: var(--sc-destructive-foreground);
+  --color-warning: var(--sc-warning);
+  --color-warning-foreground: var(--sc-warning-foreground);
+  --color-success: var(--sc-success);
+  --color-success-foreground: var(--sc-success-foreground);
+  --color-info: var(--sc-info);
+  --color-info-foreground: var(--sc-info-foreground);
+  --color-brand: var(--sc-brand);
+  --color-stage-yellow: var(--sc-stage-yellow);
+  --color-stage-yellow-foreground: var(--sc-stage-yellow-foreground);
+  --color-stage-green: var(--sc-stage-green);
+  --color-stage-green-foreground: var(--sc-stage-green-foreground);
+  --color-stage-orange: var(--sc-stage-orange);
+  --color-stage-orange-foreground: var(--sc-stage-orange-foreground);
+  --color-stage-charcoal: var(--sc-stage-charcoal);
+  --color-stage-charcoal-foreground: var(--sc-stage-charcoal-foreground);
+  --color-glass: var(--sc-glass);
+  --color-scrim: var(--sc-scrim);
+  --color-toast: var(--sc-toast);
+  --color-toast-foreground: var(--sc-toast-foreground);
+  --color-border: var(--sc-border);
+  --color-input: var(--sc-input);
+  --color-ring: var(--sc-ring);
+  --radius-sm: calc(var(--sc-radius) - 4px);
+  --radius-md: calc(var(--sc-radius) - 2px);
+  --radius-lg: var(--sc-radius);
+  --radius-xl: calc(var(--sc-radius) + 4px);
+  --radius-card: var(--sc-radius-card);
+  --radius-item: var(--sc-radius-item);
+  --radius-control: 9999px;
+  --shadow-soft: var(--sc-shadow-soft);
+  --shadow-lift: var(--sc-shadow-lift);
+}
+
+/* Tailwind v4 draws a plain `border` in currentColor; the recipes expect the theme border color.
+ * In the base layer, so the app's own unlayered CSS (index.css) still wins wherever it sets a border color. */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-border);
+  }
+  body {
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
+  }
+  code, kbd, pre, samp { font-family: var(--font-mono); }
+}
+
+:root {
+  --sc-background: #f6f1e7;
+  --sc-background-glow: #efe4cc;
+  --sc-foreground: #1d1b17;
+  --sc-card: #ffffff;
+  --sc-card-foreground: #1d1b17;
+  --sc-popover: #ffffff;
+  --sc-popover-foreground: #1d1b17;
+  --sc-primary: #24221e;
+  --sc-primary-foreground: #ffffff;
+  --sc-secondary: #efebe1;
+  --sc-secondary-foreground: #24221e;
+  --sc-muted: #efebe1;
+  --sc-muted-foreground: #6b655a;
+  --sc-accent: #e9e3d4;
+  --sc-accent-foreground: #24221e;
+  --sc-destructive: #b3341c;
+  --sc-destructive-foreground: #ffffff;
+  --sc-warning: #d9a21b;
+  --sc-warning-foreground: #7a5a00;
+  --sc-success: #2f9a62;
+  --sc-success-foreground: #1b6f43;
+  --sc-info: #3b6fb6;
+  --sc-info-foreground: #2c5694;
+  --sc-brand: #006884;
+  --sc-stage-yellow: #e6b422;
+  --sc-stage-yellow-foreground: #2a2108;
+  --sc-stage-green: #1f6b5c;
+  --sc-stage-green-foreground: #ffffff;
+  --sc-stage-orange: #c4502b;
+  --sc-stage-orange-foreground: #ffffff;
+  --sc-stage-charcoal: #2a2825;
+  --sc-stage-charcoal-foreground: #ffffff;
+  --sc-glass: rgb(255 255 255 / 0.72);
+  --sc-scrim: rgb(20 15 5 / 0.4);
+  --sc-glass-border: rgb(40 30 10 / 0.1);
+  --sc-toast: #24221e;
+  --sc-toast-foreground: #ffffff;
+  --sc-border: rgb(40 30 10 / 0.08);
+  --sc-input: rgb(40 30 10 / 0.16);
+  --sc-ring: #1f6b5c;
+  --sc-radius: 0.875rem;
+  --sc-radius-card: 1.5rem;
+  --sc-radius-item: 1.25rem;
+  --sc-shadow-soft: 0 10px 34px rgb(70 50 10 / 0.09);
+  --sc-shadow-lift: 0 18px 44px rgb(70 50 10 / 0.22);
+}
+
+.dark {
+  --sc-background: #151410;
+  --sc-background-glow: #1e1b15;
+  --sc-foreground: #f2eee5;
+  --sc-card: #201e1a;
+  --sc-card-foreground: #f2eee5;
+  --sc-popover: #26231f;
+  --sc-popover-foreground: #f2eee5;
+  --sc-primary: #f2eee5;
+  --sc-primary-foreground: #1a1814;
+  --sc-secondary: #2d2a25;
+  --sc-secondary-foreground: #f2eee5;
+  --sc-muted: #2d2a25;
+  --sc-muted-foreground: #a09a8b;
+  --sc-accent: #38342d;
+  --sc-accent-foreground: #f2eee5;
+  --sc-destructive: #f0937b;
+  --sc-destructive-foreground: #2a0e07;
+  --sc-warning: #d4a62a;
+  --sc-warning-foreground: #e8c85c;
+  --sc-success: #3f9d6b;
+  --sc-success-foreground: #6fd09a;
+  --sc-info: #5b8fd6;
+  --sc-info-foreground: #8fb6ec;
+  --sc-brand: #a0eeff;
+  --sc-stage-yellow: #d4a62a;
+  --sc-stage-yellow-foreground: #1f1805;
+  --sc-stage-green: #2a7f6c;
+  --sc-stage-green-foreground: #ffffff;
+  --sc-stage-orange: #bd5430;
+  --sc-stage-orange-foreground: #ffffff;
+  --sc-stage-charcoal: #46423b;
+  --sc-stage-charcoal-foreground: #f2eee5;
+  --sc-glass: rgb(32 30 26 / 0.66);
+  --sc-scrim: rgb(0 0 0 / 0.65);
+  --sc-glass-border: rgb(255 255 255 / 0.1);
+  --sc-toast: #3a362f;
+  --sc-toast-foreground: #f2eee5;
+  --sc-border: rgb(255 255 255 / 0.07);
+  --sc-input: rgb(255 255 255 / 0.16);
+  --sc-ring: #6fd0b9;
+  --sc-shadow-soft: 0 10px 34px rgb(0 0 0 / 0.45);
+  --sc-shadow-lift: 0 18px 44px rgb(0 0 0 / 0.6);
+}
+
+/* The Building popups' canvas: the cream background with its faint warm glow. */
+.canvas-warm {
+  background: radial-gradient(1100px 560px at 8% -8%, var(--sc-background-glow), var(--sc-background));
+}
+
+/* HUD surfaces over the 3D scene: translucent and blurred rather than solid. */
+.glass {
+  background: var(--sc-glass);
+  border: 1px solid var(--sc-glass-border);
+  box-shadow: var(--sc-shadow-soft);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+}
+
+/* A stage modal grows out of the card that was clicked (--zoom-dx/--zoom-dy: the offset of the click from the screen centre). */
+@keyframes stage-modal-zoom {
+  from { opacity: 0; transform: translate(calc(-50% + var(--zoom-dx, 0px)), calc(-50% + var(--zoom-dy, 0px))) scale(0.5); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+.stage-modal-zoom[data-state='open'] { animation: stage-modal-zoom 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+/* Motion: every keyframe and transition in the app is dropped when the person asks for less. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+
+/* Rendered markdown in the project popup (documents, task specs, a workflow run's step summaries,
+ * outputs and completion report) — the design's `.doc-content` typography, built only from shadcn
+ * tokens. It must stay readable in the run view's narrow Summary column, so nothing in it may widen
+ * its container. (Chat bubbles keep `.markdown-document` from index.css.) */
+@layer components {
+  .doc-content {
+    @apply min-w-0 break-words text-sm leading-7 text-foreground;
+  }
+  /* No stray outer margin, so the content sits evenly inside whatever box holds it. */
+  .doc-content > :first-child {
+    @apply mt-0;
+  }
+  .doc-content > :last-child {
+    @apply mb-0;
+  }
+  .doc-content h1 {
+    @apply mb-4 text-3xl font-semibold tracking-tight;
+  }
+  .doc-content h2 {
+    @apply mt-8 mb-3 border-b pb-2 text-xl font-semibold tracking-tight;
+  }
+  .doc-content h3 {
+    @apply mt-6 mb-2 text-base font-semibold tracking-tight;
+  }
+  .doc-content h4 {
+    @apply mt-4 mb-1.5 text-sm font-semibold;
+  }
+  .doc-content p {
+    @apply mb-4;
+  }
+  .doc-content ul {
+    @apply mb-4 list-disc space-y-1 pl-6;
+  }
+  .doc-content ol {
+    @apply mb-4 list-decimal space-y-1 pl-6;
+  }
+  .doc-content li > :is(ul, ol) {
+    @apply mt-1 mb-0;
+  }
+  /* GFM task lists: the checkbox replaces the bullet. */
+  .doc-content ul.contains-task-list {
+    @apply list-none pl-1;
+  }
+  .doc-content .task-list-item input[type='checkbox'] {
+    @apply mr-2 align-middle accent-primary;
+  }
+  .doc-content a {
+    @apply font-medium underline underline-offset-4;
+  }
+  /* Blockquotes carry what the reader must not miss (a risk, a decision needed), so they stand out rather than recede. */
+  .doc-content blockquote {
+    @apply mb-4 rounded-r-md border-l-4 border-primary bg-muted/50 py-2 pr-3 pl-4 text-foreground;
+  }
+  .doc-content blockquote > :last-child {
+    @apply mb-0;
+  }
+  .doc-content code {
+    @apply rounded bg-muted px-1.5 py-0.5 font-mono text-[0.8125rem];
+  }
+  .doc-content pre {
+    @apply mb-4 overflow-x-auto rounded-lg border bg-muted/50 p-4;
+  }
+  .doc-content pre code {
+    @apply bg-transparent p-0;
+  }
+  /* As a block the table shrinks to fit, wrapping cells at word boundaries; only a table that still
+   * can't fit scrolls, inside itself, never widening the column it sits in. */
+  .doc-content table {
+    @apply mb-4 block max-w-full overflow-x-auto border-collapse text-sm;
+  }
+  .doc-content th {
+    @apply border bg-muted/50 px-3 py-1.5 text-left align-top font-medium;
+  }
+  .doc-content td {
+    @apply border px-3 py-1.5 align-top;
+  }
+  .doc-content :is(th, td) code {
+    overflow-wrap: anywhere;
+  }
+  .doc-content hr {
+    @apply my-6;
+  }
+
+  /* The Code tab uses the full viewport width and never creates a nested horizontal scroller. */
+  .code-markdown {
+    @apply min-w-0 max-w-none overflow-x-hidden;
+  }
+  .code-markdown pre {
+    @apply overflow-x-hidden whitespace-pre-wrap break-words;
+    overflow-wrap: anywhere;
+  }
+  .code-markdown table {
+    @apply table w-full overflow-visible;
+    table-layout: fixed;
+  }
+  .code-markdown :is(th, td) {
+    overflow-wrap: anywhere;
+  }
+}
+
+/* Prism token colors use theme-aware values while leaving layout/background to the code viewer. */
+:root {
+  --syntax-comment: #64748b;
+  --syntax-punctuation: #64748b;
+  --syntax-property: #b4234d;
+  --syntax-string: #147d48;
+  --syntax-operator: #9a5b13;
+  --syntax-keyword: #5b50b6;
+  --syntax-function: #1768a6;
+  --syntax-variable: #9f3b16;
+}
+
+.dark {
+  --syntax-comment: #94a3b8;
+  --syntax-punctuation: #a8b3c4;
+  --syntax-property: #ff7aa8;
+  --syntax-string: #79dca5;
+  --syntax-operator: #f5c46b;
+  --syntax-keyword: #c5a6ff;
+  --syntax-function: #75c7ff;
+  --syntax-variable: #ff9c73;
+}
+
+.syntax-code .token.comment,
+.syntax-code .token.prolog,
+.syntax-code .token.doctype,
+.syntax-code .token.cdata { color: var(--syntax-comment); font-style: italic; }
+.syntax-code .token.punctuation { color: var(--syntax-punctuation); }
+.syntax-code .token.property,
+.syntax-code .token.tag,
+.syntax-code .token.boolean,
+.syntax-code .token.number,
+.syntax-code .token.constant,
+.syntax-code .token.symbol,
+.syntax-code .token.deleted { color: var(--syntax-property); }
+.syntax-code .token.selector,
+.syntax-code .token.attr-name,
+.syntax-code .token.string,
+.syntax-code .token.char,
+.syntax-code .token.builtin,
+.syntax-code .token.inserted { color: var(--syntax-string); }
+.syntax-code .token.operator,
+.syntax-code .token.entity,
+.syntax-code .token.url,
+.syntax-code .language-css .token.string,
+.syntax-code .style .token.string { color: var(--syntax-operator); }
+.syntax-code .token.atrule,
+.syntax-code .token.attr-value,
+.syntax-code .token.keyword { color: var(--syntax-keyword); }
+.syntax-code .token.function,
+.syntax-code .token.class-name { color: var(--syntax-function); }
+.syntax-code .token.regex,
+.syntax-code .token.important,
+.syntax-code .token.variable { color: var(--syntax-variable); }
+.syntax-code .token.important,
+.syntax-code .token.bold { font-weight: 700; }
+.syntax-code .token.italic { font-style: italic; }

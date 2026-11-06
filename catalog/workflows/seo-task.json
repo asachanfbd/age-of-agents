@@ -1,0 +1,17 @@
+{
+  "id": "seo-task",
+  "name": "SEO Task",
+  "description": "Built-in default for the SEO type: one step that works an SEO task described by the person. Runs in the Building's own folder (no repository).",
+  "enabled": true,
+  "steps": [
+    {
+      "agentId": "manager",
+      "instructions": "Work the SEO task described in this run. Report what you found and what you changed in the Building's working folder. Do not commit, push or open a pull request: this Building has no repository.",
+      "id": "work-seo-task",
+      "name": "Work the SEO task",
+      "canEditCode": false,
+      "requiresApproval": false,
+      "quickLook": "none"
+    }
+  ]
+}

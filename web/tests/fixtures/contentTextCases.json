@@ -1,0 +1,136 @@
+{
+ "_comment": "Thread-split and hashtag cases shared by server/tests/platformLimits.test.ts (U11/U14/U15) and web/tests/contentPostTabs.test.mjs (W10/W11), so both copies count the same way.",
+ "threads": [
+  [
+   "a\n---\nb",
+   [
+    "a",
+    "b"
+   ]
+  ],
+  [
+   "a\n--- \nb",
+   [
+    "a",
+    "b"
+   ]
+  ],
+  [
+   "a\n  ---\nb",
+   [
+    "a",
+    "b"
+   ]
+  ],
+  [
+   "a\r\n---\r\nb",
+   [
+    "a",
+    "b"
+   ]
+  ],
+  [
+   "a\n\t---\t\nb",
+   [
+    "a",
+    "b"
+   ]
+  ],
+  [
+   "a\n----\nb",
+   [
+    "a\n----\nb"
+   ]
+  ],
+  [
+   "a\n---x\nb",
+   [
+    "a\n---x\nb"
+   ]
+  ],
+  [
+   "a --- b",
+   [
+    "a --- b"
+   ]
+  ],
+  [
+   "---\na\n---\nb\n---",
+   [
+    "a",
+    "b"
+   ]
+  ],
+  [
+   "a\n---\n---\nb",
+   [
+    "a",
+    "b"
+   ]
+  ],
+  [
+   "a\n---\n   \n---\nb",
+   [
+    "a",
+    "b"
+   ]
+  ],
+  [
+   "  a  \n---\n  b  ",
+   [
+    "a",
+    "b"
+   ]
+  ],
+  [
+   "---\n---",
+   []
+  ]
+ ],
+ "hashtags": [
+  [
+   "#café",
+   1
+  ],
+  [
+   "#123",
+   1
+  ],
+  [
+   "#a_b",
+   1
+  ],
+  [
+   "#",
+   0
+  ],
+  [
+   "# x",
+   0
+  ],
+  [
+   "#-x",
+   0
+  ],
+  [
+   "##tag",
+   1
+  ],
+  [
+   "#a#b",
+   2
+  ],
+  [
+   "see https://a.b/#top",
+   1
+  ],
+  [
+   "no tags",
+   0
+  ]
+ ],
+ "emoji": {
+  "text": "🏘️",
+  "count": 2
+ }
+}

@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "suites": [
+    {
+      "id": "unit",
+      "label": "Unit tests",
+      "kind": "unit",
+      "description": "Fast, isolated tests for the API package.",
+      "primaryActionId": "run",
+      "actions": [
+        {
+          "id": "run",
+          "label": "Run unit tests",
+          "purpose": "result",
+          "workingDirectory": "packages/api",
+          "command": "npm test -- --reporter=junit --output=\"$AGENT_VISUAL_OS_TEST_ARTIFACTS_DIR/junit.xml\" --coverage-dir=\"$AGENT_VISUAL_OS_TEST_ARTIFACTS_DIR/coverage\"",
+          "collectors": [
+            { "id": "cases", "format": "junit-xml", "path": "junit.xml" },
+            { "id": "coverage", "format": "lcov", "path": "coverage/lcov.info" }
+          ]
+        },
+        {
+          "id": "changed",
+          "label": "Run tests for changed files",
+          "command": "npm test -- --changed --reporter=junit --output=\"$AGENT_VISUAL_OS_TEST_ARTIFACTS_DIR/junit.xml\"",
+          "workingDirectory": "packages/api",
+          "collectors": [{ "id": "cases", "format": "junit-xml", "path": "junit.xml" }]
+        },
+        {
+          "id": "update-snapshots",
+          "label": "Update snapshots",
+          "purpose": "utility",
+          "workingDirectory": "packages/api",
+          "command": "npm test -- --update-snapshots"
+        }
+      ]
+    },
+    {
+      "id": "integration",
+      "label": "Integration tests",
+      "kind": "integration",
+      "primaryActionId": "pytest",
+      "actions": [
+        {
+          "id": "pytest",
+          "label": "Run pytest",
+          "command": "pytest --junitxml=\"$AGENT_VISUAL_OS_TEST_ARTIFACTS_DIR/pytest.xml\" --cov --cov-report=xml:\"$AGENT_VISUAL_OS_TEST_ARTIFACTS_DIR/coverage.xml\"",
+          "workingDirectory": "services/worker",
+          "collectors": [
+            { "id": "cases", "format": "junit-xml", "path": "pytest.xml" },
+            { "id": "coverage", "format": "cobertura-xml", "path": "coverage.xml" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "load",
+      "label": "Load test",
+      "kind": "performance",
+      "primaryActionId": "k6",
+      "actions": [
+        {
+          "id": "k6",
+          "label": "Run k6 smoke load",
+          "command": "k6 run load/smoke.js && node scripts/k6-to-avos.mjs > \"$AGENT_VISUAL_OS_TEST_ARTIFACTS_DIR/result.json\"",
+          "collectors": [{ "id": "summary", "format": "avos-result", "path": "result.json" }]
+        }
+      ],
+      "metrics": [
+        { "key": "p95-latency", "label": "p95 latency", "unit": "ms", "direction": "lower-is-better" },
+        { "key": "throughput", "label": "Throughput", "unit": "req/s", "direction": "higher-is-better" }
+      ]
+    },
+    {
+      "id": "security",
+      "label": "Static security scan",
+      "kind": "security",
+      "primaryActionId": "semgrep",
+      "actions": [
+        {
+          "id": "semgrep",
+          "label": "Run Semgrep",
+          "command": "semgrep scan --sarif --output \"$AGENT_VISUAL_OS_TEST_ARTIFACTS_DIR/semgrep.sarif\"",
+          "collectors": [{ "id": "findings", "format": "sarif", "path": "semgrep.sarif" }]
+        }
+      ]
+    },
+    {
+      "id": "lighthouse",
+      "label": "Lighthouse budget",
+      "kind": "custom",
+      "enabled": false,
+      "primaryActionId": "audit",
+      "actions": [
+        {
+          "id": "audit",
+          "label": "Audit the home page",
+          "command": "php artisan lighthouse:audit --out \"$AGENT_VISUAL_OS_TEST_ARTIFACTS_DIR/lighthouse.json\"",
+          "enabled": false,
+          "collectors": [{ "id": "scores", "format": "avos-result", "path": "lighthouse.json" }]
+        }
+      ],
+      "metrics": [{ "key": "performance-score", "label": "Performance score", "direction": "higher-is-better" }]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "seo-audit",
+  "name": "SEO Site Audit",
+  "description": "Built-in default for the SEO audit slot: one step that reads the latest crawl data and lists issues, then waits for approval.",
+  "enabled": true,
+  "steps": [
+    {
+      "agentId": "manager",
+      "instructions": "Audit the pages listed in this run from the crawl data given (status, title, meta description, canonical, noindex, links) and list the problems worth fixing with a recommended fix each. Propose only; change nothing. Do not commit, push or open a pull request: this Building has no repository, and the website must never be edited. Do not browse the web unless the task says so. Finish by completing the step with one output named \"proposals\", format markdown, whose content is only a JSON object like {\"pages\":[{\"url\":\"exact page address\",\"title\":\"\",\"meta\":\"\",\"notes\":\"issue and recommended fix\"}]}. Include only pages from the list.",
+      "id": "audit-site",
+      "name": "Audit the site",
+      "canEditCode": false,
+      "requiresApproval": true,
+      "quickLook": "none"
+    }
+  ]
+}

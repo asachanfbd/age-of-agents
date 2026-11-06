@@ -1,0 +1,16 @@
+{
+  "id": "software-development",
+  "name": "Software Development",
+  "description": "Test fixture: a single-step workflow so executePlanItem tests have a real Workflow to run through, mirroring the real repo's seeded catalog/workflows/software-development.json in miniature.",
+  "enabled": true,
+  "steps": [
+    {
+      "id": "development",
+      "name": "Development",
+      "agentId": "builder",
+      "canEditCode": true,
+      "requiresApproval": false,
+      "instructions": "Implement the task."
+    }
+  ]
+}

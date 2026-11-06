@@ -1,0 +1,566 @@
+<!doctype html>
+<!--
+  Notifications drawer template
+  -----------------------------
+  Standalone, static mock of the notification center. Open it directly in a browser.
+
+  Built from shadcn/ui recipes (new-york style, neutral base color, stock light/dark tokens):
+    Drawer (right-hand side), Tabs, Select, Button, Badge.
+  shadcn ships as React + Tailwind + Radix/vaul, so here the components are expressed as
+  `@layer components` classes that hold the exact shadcn class recipes (.btn, .badge, .tabs-trigger,
+  .select, .drawer-content, ...). vaul's open/close behaviour is replaced by a few lines of vanilla JS
+  that set the same `data-state` attributes it would. The Select recipe is applied to a native <select>.
+
+  Behaviour:
+    - Two tabs, Unread and Read. A notification's tab is fixed while the drawer is open: toggling its read
+      status only changes its dot, and it moves to the other tab the next time the drawer opens.
+    - Three filters above the list: status, severity and project. They apply to both tabs.
+    - Each tab shows 10 notifications and a "Load more" button reveals the next 10.
+    - Clicking a notification marks it read and opens its target: a project, the city center, a project's
+      task, a planning session, an agent or a skill.
+    - The dot on the top right of each notification toggles its read status without opening it.
+    - "Mark all as read" (top right) marks every unread notification that matches the current filters.
+
+  Theme: the sun/moon button in the top-right corner of the page (outside the drawer) toggles the
+  `.dark` class on <html>, persisted in localStorage and defaulting to the OS preference.
+
+  To wire it to real data, replace the NOTIFICATIONS constant in the script at the bottom of the file and
+  implement openTarget(target), which receives { type, label, project } and should navigate the app.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Notifications drawer</title>
+
+    <!-- Apply the saved theme before first paint to avoid a flash. -->
+    <script>
+      (function () {
+        var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        try {
+          var saved = localStorage.getItem("theme");
+          if (saved) dark = saved === "dark";
+        } catch (e) {}
+        document.documentElement.classList.toggle("dark", dark);
+      })();
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
+
+    <style type="text/tailwindcss">
+      @custom-variant dark (&:is(.dark *));
+
+      @theme inline {
+        --color-background: var(--background);
+        --color-foreground: var(--foreground);
+        --color-card: var(--card);
+        --color-card-foreground: var(--card-foreground);
+        --color-popover: var(--popover);
+        --color-popover-foreground: var(--popover-foreground);
+        --color-primary: var(--primary);
+        --color-primary-foreground: var(--primary-foreground);
+        --color-secondary: var(--secondary);
+        --color-secondary-foreground: var(--secondary-foreground);
+        --color-muted: var(--muted);
+        --color-muted-foreground: var(--muted-foreground);
+        --color-accent: var(--accent);
+        --color-accent-foreground: var(--accent-foreground);
+        --color-destructive: var(--destructive);
+        --color-border: var(--border);
+        --color-input: var(--input);
+        --color-ring: var(--ring);
+        --radius-sm: calc(var(--radius) - 4px);
+        --radius-md: calc(var(--radius) - 2px);
+        --radius-lg: var(--radius);
+        --radius-xl: calc(var(--radius) + 4px);
+      }
+
+      /* shadcn default "neutral" theme */
+      :root {
+        --radius: 0.625rem;
+        --background: oklch(1 0 0);
+        --foreground: oklch(0.145 0 0);
+        --card: oklch(1 0 0);
+        --card-foreground: oklch(0.145 0 0);
+        --popover: oklch(1 0 0);
+        --popover-foreground: oklch(0.145 0 0);
+        --primary: oklch(0.205 0 0);
+        --primary-foreground: oklch(0.985 0 0);
+        --secondary: oklch(0.97 0 0);
+        --secondary-foreground: oklch(0.205 0 0);
+        --muted: oklch(0.97 0 0);
+        --muted-foreground: oklch(0.556 0 0);
+        --accent: oklch(0.97 0 0);
+        --accent-foreground: oklch(0.205 0 0);
+        --destructive: oklch(0.577 0.245 27.325);
+        --border: oklch(0.922 0 0);
+        --input: oklch(0.922 0 0);
+        --ring: oklch(0.708 0 0);
+      }
+
+      .dark {
+        --background: oklch(0.145 0 0);
+        --foreground: oklch(0.985 0 0);
+        --card: oklch(0.205 0 0);
+        --card-foreground: oklch(0.985 0 0);
+        --popover: oklch(0.205 0 0);
+        --popover-foreground: oklch(0.985 0 0);
+        --primary: oklch(0.922 0 0);
+        --primary-foreground: oklch(0.205 0 0);
+        --secondary: oklch(0.269 0 0);
+        --secondary-foreground: oklch(0.985 0 0);
+        --muted: oklch(0.269 0 0);
+        --muted-foreground: oklch(0.708 0 0);
+        --accent: oklch(0.269 0 0);
+        --accent-foreground: oklch(0.985 0 0);
+        --destructive: oklch(0.704 0.191 22.216);
+        --border: oklch(1 0 0 / 10%);
+        --input: oklch(1 0 0 / 15%);
+        --ring: oklch(0.556 0 0);
+      }
+
+      @layer base {
+        * {
+          @apply border-border outline-ring/50;
+        }
+        body {
+          @apply bg-background text-foreground antialiased;
+        }
+      }
+
+      /* ---- shadcn component recipes ---- */
+      @layer components {
+        /* Button */
+        .btn {
+          @apply inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0;
+        }
+        .btn-sm {
+          @apply h-8 gap-1.5 px-3;
+        }
+        .btn-icon {
+          @apply size-9 p-0;
+        }
+        .btn-icon-sm {
+          @apply size-8 p-0;
+        }
+        .btn-default {
+          @apply bg-primary text-primary-foreground shadow-xs hover:bg-primary/90;
+        }
+        .btn-destructive {
+          @apply bg-destructive text-white shadow-xs hover:bg-destructive/90 dark:bg-destructive/60;
+        }
+        .btn-secondary {
+          @apply bg-secondary text-secondary-foreground shadow-xs hover:bg-secondary/80;
+        }
+        .btn-outline {
+          @apply border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50;
+        }
+        .btn-ghost {
+          @apply hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50;
+        }
+
+        /* Badge */
+        .badge {
+          @apply inline-flex w-fit shrink-0 items-center justify-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium whitespace-nowrap [&_svg]:size-3;
+        }
+        .badge-secondary {
+          @apply border-transparent bg-secondary text-secondary-foreground;
+        }
+        .badge-outline {
+          @apply text-foreground;
+        }
+        .badge-success {
+          @apply border-transparent bg-emerald-500/15 text-emerald-700 dark:text-emerald-400;
+        }
+        .badge-warning {
+          @apply border-transparent bg-amber-500/15 text-amber-700 dark:text-amber-400;
+        }
+        .badge-destructive {
+          @apply border-transparent bg-destructive/15 text-destructive;
+        }
+
+        /* Card */
+        .card {
+          @apply rounded-xl border bg-card text-card-foreground shadow-sm;
+        }
+
+        /* Tabs */
+        .tabs-list {
+          @apply inline-flex h-9 w-fit items-center justify-center rounded-lg bg-muted p-[3px] text-muted-foreground;
+        }
+        .tabs-trigger {
+          @apply inline-flex h-[calc(100%-1px)] items-center justify-center gap-1.5 rounded-md border border-transparent px-3 py-1 text-sm font-medium whitespace-nowrap text-foreground transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:shadow-sm dark:text-muted-foreground dark:data-[state=active]:border-input dark:data-[state=active]:bg-input/30 dark:data-[state=active]:text-foreground [&_svg]:size-4 [&_svg]:shrink-0;
+        }
+
+        /* Select trigger (shadcn Select recipe on a native <select>) */
+        .select {
+          @apply h-8 w-full min-w-0 appearance-none rounded-md border border-input bg-transparent py-1 pr-7 pl-2.5 text-xs whitespace-nowrap shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30 dark:hover:bg-input/50;
+        }
+
+        /* Drawer (shadcn Drawer, direction="right") */
+        .drawer-overlay {
+          @apply fixed inset-0 z-50 bg-black/60 opacity-0 backdrop-blur-[2px] transition-opacity duration-300 data-[state=open]:opacity-100;
+        }
+        .drawer-content {
+          @apply fixed inset-y-0 right-0 z-50 flex w-3/4 max-w-md translate-x-full flex-col border-l bg-background shadow-lg transition-transform duration-300 ease-out data-[state=open]:translate-x-0 max-sm:w-[calc(100%-2.5rem)];
+        }
+      }
+    </style>
+  </head>
+
+  <body class="min-h-screen">
+    <!-- Theme switch lives on the page, not in the drawer. Sits below the drawer and its backdrop. -->
+    <button id="theme-toggle" class="btn btn-outline btn-icon fixed top-4 right-4 z-40 rounded-full" aria-label="Toggle theme">
+      <i data-lucide="sun" class="hidden dark:block"></i>
+      <i data-lucide="moon" class="dark:hidden"></i>
+    </button>
+
+    <!-- Page behind the drawer -->
+    <main class="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 p-6 text-center">
+      <button id="drawer-open" class="btn btn-default relative">
+        <i data-lucide="bell"></i>
+        Notifications
+        <span id="bell-count" class="badge absolute -top-2 -right-2 h-5 min-w-5 justify-center rounded-full border-transparent bg-destructive px-1 text-[10px] text-white" hidden></span>
+      </button>
+      <p id="last-opened" class="text-sm text-muted-foreground">Click a notification to open its target. It shows up here.</p>
+    </main>
+
+    <!-- Drawer -->
+    <div id="drawer" data-state="closed" class="pointer-events-none invisible transition-[visibility] duration-300 data-[state=open]:pointer-events-auto data-[state=open]:visible">
+      <div id="drawer-overlay" class="drawer-overlay" data-state="closed"></div>
+      <aside id="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title" class="drawer-content" data-state="closed">
+        <!-- Header -->
+        <header class="flex items-start justify-between gap-3 border-b px-4 py-3.5">
+          <div class="min-w-0">
+            <h2 id="drawer-title" class="text-base font-semibold tracking-tight">Notifications</h2>
+            <p id="drawer-desc" class="mt-0.5 text-xs text-muted-foreground"></p>
+          </div>
+          <div class="flex shrink-0 items-center gap-1">
+            <button id="mark-all" class="btn btn-ghost btn-sm"><i data-lucide="check-check"></i>Mark all as read</button>
+            <button id="drawer-close" class="btn btn-ghost btn-icon-sm" aria-label="Close"><i data-lucide="x"></i></button>
+          </div>
+        </header>
+
+        <!-- Tabs -->
+        <div class="px-4 pt-3">
+          <div id="tab-list" role="tablist" aria-label="Read status" class="tabs-list w-full">
+            <button role="tab" class="tabs-trigger flex-1" data-tab="unread">Unread<span data-tab-count="unread" class="badge badge-secondary px-1.5"></span></button>
+            <button role="tab" class="tabs-trigger flex-1" data-tab="read">Read<span data-tab-count="read" class="badge badge-secondary px-1.5"></span></button>
+          </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="grid grid-cols-3 gap-2 border-b px-4 py-3">
+          <label class="relative">
+            <span class="sr-only">Filter by status</span>
+            <select id="filter-status" class="select" data-filter="status"></select>
+            <i data-lucide="chevron-down" class="pointer-events-none absolute top-1/2 right-2 size-3.5 -translate-y-1/2 text-muted-foreground"></i>
+          </label>
+          <label class="relative">
+            <span class="sr-only">Filter by severity</span>
+            <select id="filter-severity" class="select" data-filter="severity"></select>
+            <i data-lucide="chevron-down" class="pointer-events-none absolute top-1/2 right-2 size-3.5 -translate-y-1/2 text-muted-foreground"></i>
+          </label>
+          <label class="relative">
+            <span class="sr-only">Filter by project</span>
+            <select id="filter-project" class="select" data-filter="project"></select>
+            <i data-lucide="chevron-down" class="pointer-events-none absolute top-1/2 right-2 size-3.5 -translate-y-1/2 text-muted-foreground"></i>
+          </label>
+        </div>
+
+        <!-- List -->
+        <section id="tab-panel" role="tabpanel" class="min-h-0 flex-1 overflow-y-auto">
+          <ul id="notification-list" class="divide-y"></ul>
+          <p id="empty-state" class="px-6 py-12 text-center text-sm text-muted-foreground" hidden></p>
+          <div id="load-more-wrap" class="p-3" hidden>
+            <button id="load-more" class="btn btn-outline btn-sm w-full"></button>
+          </div>
+        </section>
+      </aside>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" role="status" aria-live="polite" class="pointer-events-none fixed bottom-4 left-1/2 z-[80] -translate-x-1/2 rounded-md border bg-popover px-3 py-2 text-sm text-popover-foreground shadow-md" hidden></div>
+
+    <script>
+      /* ------------------------------------------------------------------ data */
+      const PAGE_SIZE = 10;
+
+      // Targets: what a notification opens.
+      //   project  -> a project's workspace       city    -> the city center
+      //   task     -> a task in a project         planning -> a planning session in a project
+      //   agent    -> an agent (worker)           skill   -> a skill in the catalog
+      const TARGET_TYPES = {
+        project: { label: "Project", icon: "folder-kanban" },
+        city: { label: "City center", icon: "building-2" },
+        task: { label: "Task", icon: "list-checks" },
+        planning: { label: "Planning session", icon: "lightbulb" },
+        agent: { label: "Agent", icon: "bot" },
+        skill: { label: "Skill", icon: "sparkles" },
+      };
+
+      const SEVERITIES = {
+        info: { label: "Info", badge: "badge-secondary", icon: "info" },
+        warning: { label: "Warning", badge: "badge-warning", icon: "triangle-alert" },
+        critical: { label: "Critical", badge: "badge-destructive", icon: "octagon-alert" },
+      };
+
+      const STATUSES = { open: "Open", acknowledged: "Acknowledged", resolved: "Resolved", dismissed: "Dismissed" };
+
+      const PROJECTS = ["agent-visual-os", "docs-site", "billing-api"];
+      const SYSTEM = "System"; // notifications that belong to no project
+
+      const minutesAgo = (n) => Date.now() - n * 60000;
+
+      // Newest first is not required here, the list sorts itself.
+      const NOTIFICATIONS = [
+        // ---- unread
+        { minutes: 2, severity: "critical", project: "agent-visual-os", status: "open", title: "Task failed: Reconnect terminal websocket", description: "The worker exited with code 1 while replaying buffered output.", target: { type: "task", label: "Reconnect terminal websocket", project: "agent-visual-os" }, read: false },
+        { minutes: 6, severity: "warning", project: SYSTEM, status: "open", title: "Claude is at 92% of its 5h limit", description: "New tasks may be paused until the window resets.", target: { type: "agent", label: "Claude" }, read: false },
+        { minutes: 11, severity: "info", project: "agent-visual-os", status: "open", title: "Planning session has a question", description: "Claude needs a decision on the scheduler and runner boundary.", target: { type: "planning", label: "Split the worker manager", project: "agent-visual-os" }, read: false },
+        { minutes: 18, severity: "info", project: "docs-site", status: "acknowledged", title: "Task completed: Document notification behaviour", description: "Codex finished and pushed 3 commits to main.", target: { type: "task", label: "Document notification behaviour", project: "docs-site" }, read: false },
+        { minutes: 25, severity: "warning", project: "billing-api", status: "open", title: "Git sync is behind by 4 commits", description: "The local branch has diverged from origin/main.", target: { type: "project", label: "billing-api" }, read: false },
+        { minutes: 33, severity: "info", project: SYSTEM, status: "open", title: "Skill installed: frontend-design", description: "The skill is now available to every agent.", target: { type: "skill", label: "frontend-design" }, read: false },
+        { minutes: 47, severity: "critical", project: "billing-api", status: "open", title: "Command failed: npm test", description: "14 tests failed in the payments module.", target: { type: "project", label: "billing-api" }, read: false },
+        { minutes: 58, severity: "info", project: SYSTEM, status: "open", title: "New city district unlocked", description: "3 plots are free in the northern district.", target: { type: "city", label: "City center" }, read: false },
+        { minutes: 75, severity: "warning", project: "agent-visual-os", status: "open", title: "Task paused: Show executor usage limits", description: "Codex hit its weekly limit part way through.", target: { type: "task", label: "Show executor usage limits", project: "agent-visual-os" }, read: false },
+        { minutes: 96, severity: "info", project: "docs-site", status: "resolved", title: "Planning session finished", description: "Command palette scope is ready to turn into tasks.", target: { type: "planning", label: "Command palette for switching projects", project: "docs-site" }, read: false },
+        { minutes: 130, severity: "info", project: SYSTEM, status: "open", title: "Codex account signed in", description: "Usage limits will refresh every five minutes.", target: { type: "agent", label: "Codex" }, read: false },
+        { minutes: 190, severity: "warning", project: "agent-visual-os", status: "open", title: "Catalog template is out of date", description: "The Next.js starter has a newer version available.", target: { type: "city", label: "Catalog" }, read: false },
+        { minutes: 240, severity: "info", project: "billing-api", status: "acknowledged", title: "Task completed: Rate-limit the usage poller", description: "Backoff now honours the provider's retry-after header.", target: { type: "task", label: "Rate-limit the usage poller", project: "billing-api" }, read: false },
+        { minutes: 320, severity: "critical", project: SYSTEM, status: "open", title: "Daemon lost connection to Claude", description: "Reconnecting automatically. Running tasks are unaffected.", target: { type: "agent", label: "Claude" }, read: false },
+        { minutes: 410, severity: "info", project: "docs-site", status: "open", title: "Skill updated: code-review", description: "The standards checklist now covers accessibility.", target: { type: "skill", label: "code-review" }, read: false },
+        { minutes: 520, severity: "warning", project: "agent-visual-os", status: "open", title: "Build is slower than usual", description: "vite build took 94s, up from a 40s average.", target: { type: "project", label: "agent-visual-os" }, read: false },
+        { minutes: 700, severity: "info", project: "billing-api", status: "dismissed", title: "Planning session started", description: "Codex is drafting the invoice export design.", target: { type: "planning", label: "Invoice export design", project: "billing-api" }, read: false },
+        { minutes: 900, severity: "info", project: SYSTEM, status: "open", title: "Weekly summary is ready", description: "12 tasks completed across 3 projects.", target: { type: "city", label: "City center" }, read: false },
+        { minutes: 1300, severity: "warning", project: "docs-site", status: "open", title: "Task blocked: Add empty state to catalog", description: "Waiting on a design decision.", target: { type: "task", label: "Add empty state to catalog", project: "docs-site" }, read: false },
+        { minutes: 1500, severity: "info", project: SYSTEM, status: "open", title: "Skill installed: research", description: "Available to every agent.", target: { type: "skill", label: "research" }, read: false },
+        // ---- read
+        { minutes: 45, severity: "info", project: "agent-visual-os", status: "resolved", title: "Task completed: Persist task state", description: "Tasks now reload from projects.json on boot.", target: { type: "task", label: "Persist task state", project: "agent-visual-os" }, read: true },
+        { minutes: 82, severity: "warning", project: "billing-api", status: "resolved", title: "Lint found 6 warnings", description: "Unused imports in the payments module.", target: { type: "project", label: "billing-api" }, read: true },
+        { minutes: 150, severity: "info", project: SYSTEM, status: "open", title: "Claude signed in", description: "Usage limits are now tracked.", target: { type: "agent", label: "Claude" }, read: true },
+        { minutes: 260, severity: "critical", project: "docs-site", status: "resolved", title: "Deploy preview failed", description: "The build timed out after 10 minutes.", target: { type: "project", label: "docs-site" }, read: true },
+        { minutes: 380, severity: "info", project: "agent-visual-os", status: "acknowledged", title: "Planning session finished", description: "Notification grouping rules are ready to build.", target: { type: "planning", label: "Notification grouping rules", project: "agent-visual-os" }, read: true },
+        { minutes: 610, severity: "info", project: SYSTEM, status: "open", title: "Skill installed: tdd", description: "Available to every agent.", target: { type: "skill", label: "tdd" }, read: true },
+        { minutes: 800, severity: "warning", project: "billing-api", status: "dismissed", title: "Task paused: Invoice export", description: "Claude hit its 5h limit.", target: { type: "task", label: "Invoice export", project: "billing-api" }, read: true },
+        { minutes: 1100, severity: "info", project: SYSTEM, status: "open", title: "City map updated", description: "2 new buildings appeared in the eastern district.", target: { type: "city", label: "City center" }, read: true },
+        { minutes: 1600, severity: "info", project: "docs-site", status: "resolved", title: "Task completed: Fix label overlap", description: "Labels fade out below the zoom threshold.", target: { type: "task", label: "Fix label overlap", project: "docs-site" }, read: true },
+        { minutes: 2000, severity: "critical", project: "agent-visual-os", status: "resolved", title: "Command failed: npm run build", description: "TypeScript reported 1 error in worldStore.ts.", target: { type: "project", label: "agent-visual-os" }, read: true },
+        { minutes: 2600, severity: "info", project: SYSTEM, status: "open", title: "Codex signed in", description: "Usage limits are now tracked.", target: { type: "agent", label: "Codex" }, read: true },
+        { minutes: 3200, severity: "warning", project: "docs-site", status: "dismissed", title: "Git sync is behind by 2 commits", description: "Pulled and fast-forwarded automatically.", target: { type: "project", label: "docs-site" }, read: true },
+      ].map((n, index) => ({ id: index + 1, createdAt: minutesAgo(n.minutes), ...n }));
+
+      /* ----------------------------------------------------------------- state */
+      const state = {
+        tab: "unread", // unread | read
+        filters: { status: "all", severity: "all", project: "all" },
+        visible: { unread: PAGE_SIZE, read: PAGE_SIZE }, // how many rows each tab currently shows
+        tabOf: {}, // notification id -> tab it is listed under, snapshotted each time the drawer opens
+      };
+      const snapshotTabs = () => {
+        state.tabOf = Object.fromEntries(NOTIFICATIONS.map((n) => [n.id, n.read ? "read" : "unread"]));
+      };
+      snapshotTabs();
+
+      /* --------------------------------------------------------------- helpers */
+      const $ = (selector, root = document) => root.querySelector(selector);
+      const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+      const byId = (id) => document.getElementById(id);
+      const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+      const refreshIcons = () => lucide.createIcons();
+      const plural = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+
+      const timeAgo = (timestamp) => {
+        const minutes = Math.max(1, Math.round((Date.now() - timestamp) / 60000));
+        if (minutes < 60) return `${minutes}m ago`;
+        const hours = Math.round(minutes / 60);
+        if (hours < 24) return `${hours}h ago`;
+        return `${Math.round(hours / 24)}d ago`;
+      };
+
+      /* ----------------------------------------------------------------- theme */
+      byId("theme-toggle").addEventListener("click", () => {
+        const dark = document.documentElement.classList.toggle("dark");
+        try {
+          localStorage.setItem("theme", dark ? "dark" : "light");
+        } catch (e) {}
+      });
+
+      /* ------------------------------------------------------------ derived data */
+      const matchesFilters = (n) => {
+        const { status, severity, project } = state.filters;
+        return (status === "all" || n.status === status) && (severity === "all" || n.severity === severity) && (project === "all" || n.project === project);
+      };
+      const filtered = () => NOTIFICATIONS.filter(matchesFilters);
+      const listFor = (tab) => filtered().filter((n) => state.tabOf[n.id] === tab).sort((a, b) => b.createdAt - a.createdAt);
+      const unreadMatching = () => filtered().filter((n) => !n.read);
+      const unreadTotal = () => NOTIFICATIONS.filter((n) => !n.read).length;
+
+      /* ----------------------------------------------------------------- render */
+      const dotButton = (n) => {
+        const label = n.read ? "Mark as unread" : "Mark as read";
+        const dot = n.read ? "ring-1 ring-inset ring-muted-foreground/60" : "bg-sky-500";
+        return `<button class="absolute top-2.5 right-3 flex size-6 items-center justify-center rounded-full outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50" data-toggle="${n.id}" aria-label="${label}" title="${label}"><span class="size-2.5 rounded-full ${dot}"></span></button>`;
+      };
+
+      const rowHtml = (n) => {
+        const severity = SEVERITIES[n.severity];
+        const target = TARGET_TYPES[n.target.type];
+        return `<li class="relative">
+          <button class="flex w-full flex-col gap-1.5 px-4 py-3 pr-11 text-left outline-none hover:bg-accent/50 focus-visible:bg-accent ${n.read ? "" : "bg-accent/30"}" data-open="${n.id}">
+            <span class="text-sm ${n.read ? "font-medium text-muted-foreground" : "font-semibold"}">${escapeHtml(n.title)}</span>
+            <span class="line-clamp-2 text-xs text-muted-foreground">${escapeHtml(n.description)}</span>
+            <span class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span class="badge ${severity.badge}"><i data-lucide="${severity.icon}"></i>${severity.label}</span>
+              <span class="badge badge-outline text-muted-foreground" title="Opens ${target.label}"><i data-lucide="${target.icon}"></i>${escapeHtml(n.target.label)}</span>
+              <span class="text-xs text-muted-foreground">${escapeHtml(n.project)} · ${timeAgo(n.createdAt)}</span>
+            </span>
+          </button>
+          ${dotButton(n)}
+        </li>`;
+      };
+
+      const EMPTY_MESSAGES = {
+        unread: "You're all caught up. No unread notifications.",
+        read: "Nothing here yet. Notifications you read will show up here.",
+      };
+
+      const renderTabs = () => {
+        $$("[data-tab]").forEach((tab) => {
+          const active = tab.dataset.tab === state.tab;
+          tab.setAttribute("aria-selected", String(active));
+          tab.dataset.state = active ? "active" : "inactive";
+        });
+        $$("[data-tab-count]").forEach((badge) => (badge.textContent = listFor(badge.dataset.tabCount).length));
+      };
+
+      const renderList = () => {
+        const rows = listFor(state.tab);
+        const shown = rows.slice(0, state.visible[state.tab]);
+        byId("notification-list").innerHTML = shown.map(rowHtml).join("");
+
+        const empty = byId("empty-state");
+        empty.hidden = rows.length > 0;
+        empty.textContent = EMPTY_MESSAGES[state.tab];
+
+        const remaining = rows.length - shown.length;
+        byId("load-more-wrap").hidden = remaining <= 0;
+        byId("load-more").textContent = `Load more (${Math.min(PAGE_SIZE, remaining)} of ${remaining} remaining)`;
+      };
+
+      const renderChrome = () => {
+        const unread = unreadTotal();
+        byId("drawer-desc").textContent = unread ? `${plural(unread, "unread notification")}` : "No unread notifications";
+        const bell = byId("bell-count");
+        bell.hidden = unread === 0;
+        bell.textContent = unread;
+        byId("mark-all").disabled = unreadMatching().length === 0;
+      };
+
+      const render = () => {
+        renderTabs();
+        renderList();
+        renderChrome();
+        refreshIcons();
+      };
+
+      /* ---------------------------------------------------------------- filters */
+      const FILTER_OPTIONS = {
+        status: [["all", "Any status"], ...Object.entries(STATUSES)],
+        severity: [["all", "Any severity"], ...Object.entries(SEVERITIES).map(([value, s]) => [value, s.label])],
+        project: [["all", "All projects"], ...[...PROJECTS, SYSTEM].map((p) => [p, p])],
+      };
+      Object.entries(FILTER_OPTIONS).forEach(([name, options]) => {
+        byId(`filter-${name}`).innerHTML = options.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join("");
+      });
+      $$("[data-filter]").forEach((select) =>
+        select.addEventListener("change", () => {
+          state.filters[select.dataset.filter] = select.value;
+          state.visible = { unread: PAGE_SIZE, read: PAGE_SIZE };
+          render();
+        }),
+      );
+
+      /* ------------------------------------------------------------------ toast */
+      let toastTimer;
+      const showToast = (message) => {
+        const toast = byId("toast");
+        toast.textContent = message;
+        toast.hidden = false;
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => (toast.hidden = true), 2600);
+      };
+
+      /* ---------------------------------------------------------------- actions */
+      // Replace this with real navigation. `target` is { type, label, project? }.
+      const openTarget = (target) => {
+        const where = target.project ? ` in ${target.project}` : "";
+        byId("last-opened").textContent = `Opened ${TARGET_TYPES[target.type].label.toLowerCase()}: ${target.label}${where}`;
+        showToast(`Opening ${target.label}`);
+      };
+
+      const findNotification = (id) => NOTIFICATIONS.find((n) => n.id === Number(id));
+
+      const setDrawerOpen = (open) => {
+        const value = open ? "open" : "closed";
+        [byId("drawer"), byId("drawer-overlay"), byId("drawer-panel")].forEach((el) => (el.dataset.state = value));
+        if (open) {
+          snapshotTabs(); // read-status changes made last time now move notifications between tabs
+          render();
+          byId("drawer-panel").querySelector("[data-tab][data-state=active]").focus();
+        } else {
+          byId("drawer-open").focus();
+        }
+      };
+      const isDrawerOpen = () => byId("drawer").dataset.state === "open";
+
+      byId("drawer-open").addEventListener("click", () => setDrawerOpen(true));
+      byId("drawer-close").addEventListener("click", () => setDrawerOpen(false));
+      byId("drawer-overlay").addEventListener("click", () => setDrawerOpen(false));
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && isDrawerOpen()) setDrawerOpen(false);
+      });
+
+      $$("[data-tab]").forEach((tab) =>
+        tab.addEventListener("click", () => {
+          state.tab = tab.dataset.tab;
+          render();
+        }),
+      );
+
+      byId("load-more").addEventListener("click", () => {
+        state.visible[state.tab] += PAGE_SIZE;
+        renderList();
+        refreshIcons();
+      });
+
+      byId("mark-all").addEventListener("click", () => {
+        const unread = unreadMatching();
+        unread.forEach((n) => (n.read = true));
+        render();
+        showToast(`Marked ${plural(unread.length, "notification")} as read`);
+      });
+
+      // One delegated handler for both row buttons: the dot toggles read status, the row opens the target.
+      byId("notification-list").addEventListener("click", (event) => {
+        const toggle = event.target.closest("[data-toggle]");
+        if (toggle) {
+          const n = findNotification(toggle.dataset.toggle);
+          n.read = !n.read;
+          return render();
+        }
+        const open = event.target.closest("[data-open]");
+        if (open) {
+          const n = findNotification(open.dataset.open);
+          n.read = true;
+          setDrawerOpen(false);
+          render();
+          openTarget(n.target);
+        }
+      });
+
+      render();
+    </script>
+  </body>
+</html>

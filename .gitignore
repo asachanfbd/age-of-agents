@@ -1,0 +1,33 @@
+# Created Projects and the daemon's file-based database — runtime state, never committed.
+# See docs/architecture.md and docs/file-structure.md.
+# Anchored to the repo root (leading slash) — a bare "projects/" would also match
+# server/src/projects/, the daemon's own source directory, and silently exclude it from git.
+/projects/
+server/data/
+
+# Machine-specific executor config (real account paths) — see server/executors.example.json
+server/executors.json
+
+# Dependencies and build output
+node_modules/
+dist/
+dist-ssr/
+*.local
+.env
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.run/

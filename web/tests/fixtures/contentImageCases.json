@@ -1,0 +1,39 @@
+{
+  "sizes": [
+    { "platform": "instagram", "format": "image", "size": { "width": 1080, "height": 1350 } },
+    { "platform": "instagram", "format": "carousel", "size": { "width": 1080, "height": 1350 } },
+    { "platform": "linkedin", "format": "image", "size": { "width": 1200, "height": 1200 } },
+    { "platform": "linkedin", "format": "carousel", "size": { "width": 1080, "height": 1350 } },
+    { "platform": "x", "format": "image", "size": { "width": 1600, "height": 900 } },
+    { "platform": "facebook", "format": "image", "size": { "width": 1200, "height": 1200 } },
+    { "platform": "facebook", "format": "carousel", "size": { "width": 1080, "height": 1080 } }
+  ],
+  "noSize": [
+    { "platform": "linkedin", "format": "text" }, { "platform": "linkedin", "format": "video" }, { "platform": "instagram", "format": "reel" },
+    { "platform": "x", "format": "text" }, { "platform": "x", "format": "video" }, { "platform": "facebook", "format": "text" }, { "platform": "blog", "format": "article" }
+  ],
+  "sizeBounds": { "min": 320, "max": 4000 },
+  "finalize": [
+    { "platform": "x", "format": "image", "state": "done", "count": 1, "reason": null },
+    { "platform": "x", "format": "image", "state": "done", "count": 4, "reason": null },
+    { "platform": "x", "format": "image", "state": "done", "count": 5, "reason": "An X image post takes 1 to 4 images; this round has 5." },
+    { "platform": "instagram", "format": "image", "state": "done", "count": 1, "reason": null },
+    { "platform": "instagram", "format": "image", "state": "done", "count": 2, "reason": "An Instagram image post takes 1 image; this round has 2." },
+    { "platform": "linkedin", "format": "image", "state": "done", "count": 2, "reason": "A LinkedIn image post takes 1 image; this round has 2." },
+    { "platform": "facebook", "format": "image", "state": "done", "count": 2, "reason": "A Facebook image post takes 1 image; this round has 2." },
+    { "platform": "instagram", "format": "carousel", "state": "done", "count": 1, "reason": "An Instagram carousel post takes 2 to 20 images; this round has 1." },
+    { "platform": "instagram", "format": "carousel", "state": "done", "count": 2, "reason": null },
+    { "platform": "instagram", "format": "carousel", "state": "done", "count": 20, "reason": null },
+    { "platform": "linkedin", "format": "carousel", "state": "done", "count": 1, "reason": "A LinkedIn carousel post takes 2 to 20 images; this round has 1." },
+    { "platform": "linkedin", "format": "carousel", "state": "done", "count": 20, "reason": null },
+    { "platform": "facebook", "format": "carousel", "state": "done", "count": 10, "reason": null },
+    { "platform": "facebook", "format": "carousel", "state": "done", "count": 11, "reason": "A Facebook carousel post takes 2 to 10 images; this round has 11." },
+    { "platform": "instagram", "format": "carousel", "state": "none", "count": 0, "reason": "Finalize needs a rendered set: 2 to 20 images for an Instagram carousel." },
+    { "platform": "x", "format": "image", "state": "none", "count": 0, "reason": "Finalize needs a rendered set: 1 to 4 images for an X image." },
+    { "platform": "instagram", "format": "carousel", "state": "queued", "count": 3, "reason": "Finalize is available once the render finishes." },
+    { "platform": "instagram", "format": "carousel", "state": "running", "count": 3, "reason": "Finalize is available once the render finishes." },
+    { "platform": "instagram", "format": "carousel", "state": "failed", "count": 3, "reason": "The last render did not finish, so there is no complete set. Render again to finalize." },
+    { "platform": "instagram", "format": "carousel", "state": "stopped", "count": 3, "reason": "The last render did not finish, so there is no complete set. Render again to finalize." },
+    { "platform": "instagram", "format": "carousel", "state": "done", "count": 0, "reason": "Finalize needs a rendered set: 2 to 20 images for an Instagram carousel." }
+  ]
+}

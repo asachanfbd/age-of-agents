@@ -1,0 +1,17 @@
+{
+  "id": "seo-keyword-clustering",
+  "name": "SEO Keyword Clustering",
+  "description": "Built-in default for the SEO keyword clustering slot: one step that groups keywords into topic clusters.",
+  "enabled": true,
+  "steps": [
+    {
+      "agentId": "manager",
+      "instructions": "Group the keywords given in this run into named topic clusters. Do not commit, push or open a pull request: this Building has no repository, and the website must never be edited. Do not browse the web unless the task says so. Use each keyword exactly as given and place every keyword in exactly one cluster. Finish by completing the step with one output named \"clusters\", format markdown, whose content is only a JSON object like {\"clusters\":[{\"name\":\"text\",\"keywords\":[\"text\"]}]}.",
+      "id": "cluster-keywords",
+      "name": "Cluster keywords",
+      "canEditCode": false,
+      "requiresApproval": false,
+      "quickLook": "none"
+    }
+  ]
+}

@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "suites": [
+    {
+      "id": "server",
+      "label": "Server (daemon)",
+      "kind": "unit",
+      "description": "Daemon unit and in-process API tests under server/tests, using temp data dirs and fakes.",
+      "enabled": true,
+      "primaryActionId": "tests",
+      "actions": [
+        {
+          "id": "tests",
+          "label": "Run tests (with coverage)",
+          "purpose": "result",
+          "command": "node --test --test-concurrency=4 --test-timeout=120000 --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=\"$AGENT_VISUAL_OS_TEST_ARTIFACTS_DIR/junit.xml\" --test-reporter=lcov --test-reporter-destination=\"$AGENT_VISUAL_OS_TEST_ARTIFACTS_DIR/lcov.info\" tests/*.test.ts",
+          "workingDirectory": "server",
+          "enabled": true,
+          "collectors": [
+            {
+              "id": "junit",
+              "format": "junit-xml",
+              "path": "junit.xml"
+            },
+            {
+              "id": "lcov",
+              "format": "lcov",
+              "path": "lcov.info"
+            }
+          ]
+        }
+      ],
+      "metrics": [
+        {
+          "key": "line-coverage",
+          "label": "Line coverage",
+          "unit": "%",
+          "direction": "higher-is-better"
+        },
+        {
+          "key": "branch-coverage",
+          "label": "Branch coverage",
+          "unit": "%",
+          "direction": "higher-is-better"
+        },
+        {
+          "key": "function-coverage",
+          "label": "Function coverage",
+          "unit": "%",
+          "direction": "higher-is-better"
+        }
+      ]
+    },
+    {
+      "id": "web",
+      "label": "Web (UI logic)",
+      "kind": "unit",
+      "description": "Pure view-model, store and source-check tests under web/tests (no DOM harness).",
+      "enabled": true,
+      "primaryActionId": "tests",
+      "actions": [
+        {
+          "id": "tests",
+          "label": "Run tests (with coverage)",
+          "purpose": "result",
+          "command": "node --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=\"$AGENT_VISUAL_OS_TEST_ARTIFACTS_DIR/junit.xml\" --test-reporter=lcov --test-reporter-destination=\"$AGENT_VISUAL_OS_TEST_ARTIFACTS_DIR/lcov.info\" tests/*.test.mjs",
+          "workingDirectory": "web",
+          "enabled": true,
+          "collectors": [
+            {
+              "id": "junit",
+              "format": "junit-xml",
+              "path": "junit.xml"
+            },
+            {
+              "id": "lcov",
+              "format": "lcov",
+              "path": "lcov.info"
+            }
+          ]
+        }
+      ],
+      "metrics": [
+        {
+          "key": "line-coverage",
+          "label": "Line coverage",
+          "unit": "%",
+          "direction": "higher-is-better"
+        },
+        {
+          "key": "branch-coverage",
+          "label": "Branch coverage",
+          "unit": "%",
+          "direction": "higher-is-better"
+        },
+        {
+          "key": "function-coverage",
+          "label": "Function coverage",
+          "unit": "%",
+          "direction": "higher-is-better"
+        }
+      ]
+    }
+  ]
+}

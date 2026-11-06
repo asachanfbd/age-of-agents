@@ -1,0 +1,80 @@
+{
+  "agents": {
+    "builder": {
+      "name": "Builder",
+      "avatar": "🤖",
+      "manager": false,
+      "defaultAutonomy": "auto",
+      "enabled": true
+    },
+    "documentation-n-retro-agent": {
+      "name": "Documentation N Retro Agent",
+      "avatar": "📑",
+      "manager": false,
+      "defaultAutonomy": "auto",
+      "enabled": true
+    },
+    "manager": {
+      "name": "Manager",
+      "avatar": "🧑‍💼",
+      "manager": true,
+      "defaultAutonomy": "auto",
+      "enabled": true
+    },
+    "rca": {
+      "name": "RCA",
+      "avatar": "🤖",
+      "manager": false,
+      "defaultAutonomy": "auto",
+      "enabled": false
+    },
+    "software-engineer": {
+      "name": "Software Engineer",
+      "avatar": "🤖",
+      "manager": false,
+      "defaultAutonomy": "auto",
+      "enabled": true
+    },
+    "tester": {
+      "name": "Tester",
+      "avatar": "🤖",
+      "manager": false,
+      "defaultAutonomy": "auto",
+      "enabled": false
+    },
+    "ui-designer": {
+      "name": "UI Designer",
+      "avatar": "🤖",
+      "manager": false,
+      "defaultAutonomy": "auto",
+      "enabled": false
+    },
+    "ux-engineer": {
+      "name": "UX Engineer",
+      "avatar": "🤖",
+      "manager": false,
+      "defaultAutonomy": "auto",
+      "enabled": false
+    }
+  },
+  "skills": {
+    "debugging": {
+      "name": "Debugging",
+      "avatar": "🧩",
+      "enabled": true,
+      "triggers": []
+    },
+    "maintain-project-context": {
+      "name": "Maintain Project Context",
+      "avatar": "🧩",
+      "enabled": true,
+      "triggers": []
+    },
+    "ui-design": {
+      "name": "UI Design",
+      "avatar": "🧩",
+      "enabled": true,
+      "triggers": []
+    }
+  }
+}

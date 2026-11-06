@@ -1,0 +1,1786 @@
+<!doctype html>
+<!--
+  Project popup template
+  ----------------------
+  Standalone, static mock of the project workspace popup. Open it directly in a browser.
+
+  Built from shadcn/ui recipes (new-york style, neutral base color, stock light/dark tokens):
+    Dialog, Tabs, Button, Badge, Dropdown Menu, Checkbox, Radio Group, Card.
+  shadcn ships as React + Tailwind + Radix, so here the components are expressed as
+  `@layer components` classes below that hold the exact shadcn class recipes (.btn, .badge,
+  .menu-item, .tabs-trigger, ...). Radix's open/close behaviour is replaced by a few lines of
+  vanilla JS that set the same `data-state` attributes Radix would.
+
+  Theme: the sun/moon button in the top-right corner of the page (outside the popup) toggles the
+  `.dark` class on <html>, persisted in localStorage and defaulting to the OS preference.
+
+  To wire it to real data, replace the PROJECT / TASKS / SESSIONS / DOC_TREE / CODE_TREE /
+  DIFF_FILES / COMMAND_HISTORY / PANELS constants in the script at the bottom of the file.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Project popup</title>
+
+    <!-- Apply the saved theme before first paint to avoid a flash. -->
+    <script>
+      (function () {
+        var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        try {
+          var saved = localStorage.getItem("theme");
+          if (saved) dark = saved === "dark";
+        } catch (e) {}
+        document.documentElement.classList.toggle("dark", dark);
+      })();
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
+
+    <style type="text/tailwindcss">
+      @custom-variant dark (&:is(.dark *));
+
+      @theme inline {
+        --color-background: var(--background);
+        --color-foreground: var(--foreground);
+        --color-card: var(--card);
+        --color-card-foreground: var(--card-foreground);
+        --color-popover: var(--popover);
+        --color-popover-foreground: var(--popover-foreground);
+        --color-primary: var(--primary);
+        --color-primary-foreground: var(--primary-foreground);
+        --color-secondary: var(--secondary);
+        --color-secondary-foreground: var(--secondary-foreground);
+        --color-muted: var(--muted);
+        --color-muted-foreground: var(--muted-foreground);
+        --color-accent: var(--accent);
+        --color-accent-foreground: var(--accent-foreground);
+        --color-destructive: var(--destructive);
+        --color-border: var(--border);
+        --color-input: var(--input);
+        --color-ring: var(--ring);
+        --radius-sm: calc(var(--radius) - 4px);
+        --radius-md: calc(var(--radius) - 2px);
+        --radius-lg: var(--radius);
+        --radius-xl: calc(var(--radius) + 4px);
+      }
+
+      /* shadcn default "neutral" theme */
+      :root {
+        --radius: 0.625rem;
+        --background: oklch(1 0 0);
+        --foreground: oklch(0.145 0 0);
+        --card: oklch(1 0 0);
+        --card-foreground: oklch(0.145 0 0);
+        --popover: oklch(1 0 0);
+        --popover-foreground: oklch(0.145 0 0);
+        --primary: oklch(0.205 0 0);
+        --primary-foreground: oklch(0.985 0 0);
+        --secondary: oklch(0.97 0 0);
+        --secondary-foreground: oklch(0.205 0 0);
+        --muted: oklch(0.97 0 0);
+        --muted-foreground: oklch(0.556 0 0);
+        --accent: oklch(0.97 0 0);
+        --accent-foreground: oklch(0.205 0 0);
+        --destructive: oklch(0.577 0.245 27.325);
+        --border: oklch(0.922 0 0);
+        --input: oklch(0.922 0 0);
+        --ring: oklch(0.708 0 0);
+      }
+
+      .dark {
+        --background: oklch(0.145 0 0);
+        --foreground: oklch(0.985 0 0);
+        --card: oklch(0.205 0 0);
+        --card-foreground: oklch(0.985 0 0);
+        --popover: oklch(0.205 0 0);
+        --popover-foreground: oklch(0.985 0 0);
+        --primary: oklch(0.922 0 0);
+        --primary-foreground: oklch(0.205 0 0);
+        --secondary: oklch(0.269 0 0);
+        --secondary-foreground: oklch(0.985 0 0);
+        --muted: oklch(0.269 0 0);
+        --muted-foreground: oklch(0.708 0 0);
+        --accent: oklch(0.269 0 0);
+        --accent-foreground: oklch(0.985 0 0);
+        --destructive: oklch(0.704 0.191 22.216);
+        --border: oklch(1 0 0 / 10%);
+        --input: oklch(1 0 0 / 15%);
+        --ring: oklch(0.556 0 0);
+      }
+
+      @layer base {
+        * {
+          @apply border-border outline-ring/50;
+        }
+        body {
+          @apply bg-background text-foreground antialiased;
+        }
+      }
+
+      /* ---- shadcn component recipes ---- */
+      @layer components {
+        /* Button */
+        .btn {
+          @apply inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0;
+        }
+        .btn-sm {
+          @apply h-8 gap-1.5 px-3;
+        }
+        .btn-icon {
+          @apply size-9 p-0;
+        }
+        .btn-icon-sm {
+          @apply size-8 p-0;
+        }
+        .btn-default {
+          @apply bg-primary text-primary-foreground shadow-xs hover:bg-primary/90;
+        }
+        .btn-destructive {
+          @apply bg-destructive text-white shadow-xs hover:bg-destructive/90 dark:bg-destructive/60;
+        }
+        .btn-secondary {
+          @apply bg-secondary text-secondary-foreground shadow-xs hover:bg-secondary/80;
+        }
+        .btn-outline {
+          @apply border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50;
+        }
+        .btn-ghost {
+          @apply hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50;
+        }
+
+        /* Badge */
+        .badge {
+          @apply inline-flex w-fit shrink-0 items-center justify-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium whitespace-nowrap [&_svg]:size-3;
+        }
+        .badge-secondary {
+          @apply border-transparent bg-secondary text-secondary-foreground;
+        }
+        .badge-outline {
+          @apply text-foreground;
+        }
+        .badge-success {
+          @apply border-transparent bg-emerald-500/15 text-emerald-700 dark:text-emerald-400;
+        }
+        .badge-warning {
+          @apply border-transparent bg-amber-500/15 text-amber-700 dark:text-amber-400;
+        }
+        .badge-destructive {
+          @apply border-transparent bg-destructive/15 text-destructive;
+        }
+
+        /* Card */
+        .card {
+          @apply rounded-xl border bg-card text-card-foreground shadow-sm;
+        }
+
+        /* Tabs */
+        .tabs-list {
+          @apply inline-flex h-9 w-fit items-center justify-center rounded-lg bg-muted p-[3px] text-muted-foreground;
+        }
+        .tabs-trigger {
+          @apply inline-flex h-[calc(100%-1px)] items-center justify-center gap-1.5 rounded-md border border-transparent px-3 py-1 text-sm font-medium whitespace-nowrap text-foreground transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:shadow-sm dark:text-muted-foreground dark:data-[state=active]:border-input dark:data-[state=active]:bg-input/30 dark:data-[state=active]:text-foreground [&_svg]:size-4 [&_svg]:shrink-0;
+        }
+
+        /* Checkbox (checked, unchecked or indeterminate) */
+        .checkbox {
+          @apply flex size-4 shrink-0 items-center justify-center rounded-[4px] border border-input shadow-xs transition-shadow outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground data-[state=indeterminate]:border-primary data-[state=indeterminate]:bg-primary data-[state=indeterminate]:text-primary-foreground dark:bg-input/30 dark:data-[state=checked]:bg-primary dark:data-[state=indeterminate]:bg-primary [&_svg]:size-3.5 [&_svg]:opacity-0 data-[state=checked]:[&_svg]:opacity-100 data-[state=indeterminate]:[&_svg]:opacity-100;
+        }
+
+        /* Tree item (file browser row) */
+        .tree-item {
+          @apply flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[active=true]:bg-accent data-[active=true]:font-medium [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground;
+        }
+
+        /* Rendered markdown */
+        .doc-content {
+          @apply text-sm leading-7 text-foreground;
+        }
+        .doc-content h1 {
+          @apply mb-4 text-3xl font-semibold tracking-tight;
+        }
+        .doc-content h2 {
+          @apply mt-8 mb-3 border-b pb-2 text-xl font-semibold tracking-tight;
+        }
+        .doc-content h3 {
+          @apply mt-6 mb-2 text-base font-semibold tracking-tight;
+        }
+        .doc-content p {
+          @apply mb-4;
+        }
+        .doc-content ul {
+          @apply mb-4 list-disc space-y-1 pl-6;
+        }
+        .doc-content ol {
+          @apply mb-4 list-decimal space-y-1 pl-6;
+        }
+        .doc-content a {
+          @apply font-medium underline underline-offset-4;
+        }
+        .doc-content blockquote {
+          @apply mb-4 border-l-2 pl-4 text-muted-foreground italic;
+        }
+        .doc-content code {
+          @apply rounded bg-muted px-1.5 py-0.5 font-mono text-[0.8125rem];
+        }
+        .doc-content pre {
+          @apply mb-4 overflow-x-auto rounded-lg border bg-muted/50 p-4;
+        }
+        .doc-content pre code {
+          @apply bg-transparent p-0;
+        }
+
+        /* Dropdown menu */
+        .menu {
+          @apply fixed z-[60] min-w-48 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md;
+        }
+        .menu-label {
+          @apply px-2 py-1.5 text-xs font-medium text-muted-foreground;
+        }
+        .menu-item {
+          @apply relative flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none select-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground;
+        }
+        .menu-item-destructive {
+          @apply text-destructive hover:bg-destructive/10 hover:text-destructive dark:hover:bg-destructive/20 [&_svg]:!text-destructive;
+        }
+        .menu-separator {
+          @apply -mx-1 my-1 h-px bg-border;
+        }
+      }
+    </style>
+  </head>
+
+  <body class="min-h-screen">
+    <!-- Theme switch lives on the page, not in the popup. Sits above the popup backdrop. -->
+    <button id="theme-toggle" class="btn btn-outline btn-icon fixed top-4 right-4 z-[70] rounded-full" aria-label="Toggle theme">
+      <i data-lucide="sun" class="hidden dark:block"></i>
+      <i data-lucide="moon" class="dark:hidden"></i>
+    </button>
+
+    <!-- Page behind the popup: only shown after the popup is closed. -->
+    <main class="flex min-h-screen items-center justify-center p-6">
+      <button id="popup-open" class="btn btn-default">
+        <i data-lucide="folder-kanban"></i>
+        Open project popup
+      </button>
+    </main>
+
+    <!-- Dialog -->
+    <div
+      id="popup-overlay"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 backdrop-blur-[2px] sm:p-6"
+    >
+      <div
+        id="popup"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="project-name"
+        class="flex h-[min(780px,100%)] w-full max-w-5xl flex-col overflow-hidden rounded-xl border bg-background shadow-lg"
+      >
+        <!-- Header -->
+        <header class="flex items-center justify-between gap-4 border-b px-4 py-3.5 sm:px-6">
+          <div class="flex min-w-0 items-center gap-3">
+            <div class="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted">
+              <i data-lucide="folder-kanban" class="size-4"></i>
+            </div>
+            <h2 id="project-name" class="truncate text-lg font-semibold tracking-tight"></h2>
+            <span id="project-state" class="badge"></span>
+          </div>
+
+          <div class="flex shrink-0 items-center gap-2">
+            <button class="btn btn-outline btn-sm" data-run="start"><i data-lucide="play"></i><span class="hidden sm:inline">Start</span></button>
+            <button class="btn btn-outline btn-sm" data-run="build"><i data-lucide="hammer"></i><span class="hidden sm:inline">Build</span></button>
+            <button class="btn btn-outline btn-sm px-2" data-menu-target="menu-commands" data-align="end" aria-label="More commands" aria-haspopup="menu" aria-expanded="false">
+              <i data-lucide="terminal"></i>
+              <i data-lucide="chevron-down" class="!size-3.5 text-muted-foreground"></i>
+            </button>
+            <span class="mx-1 hidden h-5 w-px bg-border sm:block"></span>
+            <button class="btn btn-outline btn-sm" data-menu-target="menu-branch" data-align="end" aria-haspopup="menu" aria-expanded="false">
+              <i data-lucide="git-branch"></i>
+              <span id="branch-label" class="max-w-32 truncate"></span>
+              <i data-lucide="chevrons-up-down" class="!size-3.5 text-muted-foreground"></i>
+            </button>
+            <button id="popup-close" class="btn btn-ghost btn-icon-sm" aria-label="Close">
+              <i data-lucide="x"></i>
+            </button>
+          </div>
+        </header>
+
+        <!-- Tabs -->
+        <div class="overflow-x-auto border-b px-4 py-3 sm:px-6">
+          <div id="tab-list" role="tablist" aria-label="Project sections" class="tabs-list">
+            <button role="tab" class="tabs-trigger" data-tab="tasks"><i data-lucide="list-checks"></i>Tasks</button>
+            <button role="tab" class="tabs-trigger" data-tab="documents"><i data-lucide="file-text"></i>Documents</button>
+            <button role="tab" class="tabs-trigger" data-tab="testing"><i data-lucide="flask-conical"></i>Testing</button>
+            <button role="tab" class="tabs-trigger" data-tab="code"><i data-lucide="code"></i>Code</button>
+            <button role="tab" class="tabs-trigger" data-tab="commands"><i data-lucide="terminal"></i>Commands</button>
+          </div>
+        </div>
+
+        <!-- Tasks -->
+        <section role="tabpanel" data-tab-panel="tasks" class="flex min-h-0 flex-1 flex-col md:flex-row">
+          <aside class="flex shrink-0 flex-col gap-4 border-b bg-muted/30 p-3 md:w-60 md:border-r md:border-b-0">
+            <nav id="task-nav" class="flex gap-1 overflow-x-auto md:flex-col" aria-label="Task groups"></nav>
+            <div class="card mt-auto hidden p-3 md:block">
+              <div class="flex items-center justify-between text-xs">
+                <span class="font-medium">Progress</span>
+                <span id="progress-label" class="text-muted-foreground"></span>
+              </div>
+              <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-primary/20" role="progressbar">
+                <div id="progress-bar" class="h-full rounded-full bg-primary transition-all"></div>
+              </div>
+            </div>
+          </aside>
+
+          <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div class="flex items-start justify-between gap-4 px-4 pt-5 pb-3 sm:px-6">
+              <div class="min-w-0">
+                <h3 id="section-title" class="text-base font-semibold tracking-tight"></h3>
+                <p id="section-desc" class="mt-0.5 text-sm text-muted-foreground"></p>
+              </div>
+              <div id="section-actions" class="flex shrink-0 items-center gap-2"></div>
+            </div>
+
+            <div id="task-toolbar" class="px-4 sm:px-6" hidden></div>
+            <ul id="task-list" class="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 pb-4 sm:px-6"></ul>
+
+            <!-- AI prompt: adds a task on Open tasks, starts a planning session on Planning, hidden on Completed -->
+            <div id="prompt-wrap" class="px-4 pt-2 pb-4 sm:px-6 sm:pb-5">
+              <form
+                id="prompt-form"
+                class="rounded-2xl border bg-card shadow-xs transition-shadow focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50"
+              >
+                <textarea
+                  id="prompt-input"
+                  rows="1"
+                  aria-label="Message the agent"
+                  class="block max-h-40 min-h-12 w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-sm outline-none placeholder:text-muted-foreground"
+                ></textarea>
+                <div class="flex items-center justify-between p-2">
+                  <button type="button" class="btn btn-ghost btn-icon-sm rounded-lg" aria-label="Attach file">
+                    <i data-lucide="plus"></i>
+                  </button>
+                  <div class="flex items-center gap-1">
+                    <button type="button" class="btn btn-ghost btn-sm text-muted-foreground" data-menu-target="menu-model" data-align="end" aria-haspopup="menu" aria-expanded="false">
+                      <span id="model-label"></span>
+                      <i data-lucide="chevron-down" class="!size-3.5"></i>
+                    </button>
+                    <button id="prompt-send" type="submit" class="btn btn-default btn-icon-sm rounded-lg" aria-label="Send" disabled>
+                      <i data-lucide="arrow-up"></i>
+                    </button>
+                  </div>
+                </div>
+              </form>
+              <p id="prompt-hint" class="mt-2 text-center text-xs text-muted-foreground"></p>
+            </div>
+          </div>
+        </section>
+
+        <!-- File browsers (Documents, Code) are rendered by script -->
+        <section role="tabpanel" data-tab-panel="documents" class="flex min-h-0 flex-1 flex-col md:flex-row" hidden></section>
+        <section role="tabpanel" data-tab-panel="testing" class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6" hidden></section>
+        <section role="tabpanel" data-tab-panel="code" class="flex min-h-0 flex-1 flex-col md:flex-row" hidden></section>
+        <section role="tabpanel" data-tab-panel="commands" class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6" hidden></section>
+      </div>
+    </div>
+
+    <!-- Confirm / input dialog (Dialog + AlertDialog recipe), stacked above the popup -->
+    <div id="modal-overlay" class="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" hidden>
+      <div role="dialog" aria-modal="true" aria-labelledby="modal-title" class="grid w-full max-w-md gap-4 rounded-lg border bg-background p-6 shadow-lg">
+        <div class="grid gap-1.5">
+          <h3 id="modal-title" class="text-lg leading-none font-semibold"></h3>
+          <p id="modal-desc" class="text-sm text-muted-foreground"></p>
+        </div>
+        <div id="modal-body"></div>
+        <div class="flex justify-end gap-2">
+          <button id="modal-cancel" class="btn btn-outline">Cancel</button>
+          <button id="modal-confirm" class="btn btn-default"></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Dropdown menus (positioned by script, so they are never clipped by scroll containers) -->
+    <div id="menu-commands" class="menu" role="menu" hidden>
+      <div class="menu-label">Run a command</div>
+      <button class="menu-item" role="menuitem"><i data-lucide="play"></i>Start dev server</button>
+      <button class="menu-item" role="menuitem"><i data-lucide="hammer"></i>Build</button>
+      <button class="menu-item" role="menuitem"><i data-lucide="flask-conical"></i>Run tests</button>
+      <button class="menu-item" role="menuitem"><i data-lucide="spell-check"></i>Lint</button>
+      <div class="menu-separator"></div>
+      <button class="menu-item" role="menuitem" data-tab-target="commands"><i data-lucide="settings-2"></i>Manage commands</button>
+    </div>
+
+    <!-- Branch switcher: the input searches existing branches and offers to create a new one -->
+    <div id="menu-branch" class="menu w-72" role="menu" hidden>
+      <div class="-mx-1 -mt-1 mb-1 flex items-center gap-2 border-b px-3" data-menu-keep>
+        <i data-lucide="search" class="size-4 shrink-0 text-muted-foreground"></i>
+        <input
+          id="branch-search"
+          data-menu-focus
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="Search or create branch..."
+          aria-label="Search or create branch"
+          class="flex h-10 w-full bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
+        />
+      </div>
+      <div id="branch-items" class="max-h-56 overflow-y-auto"></div>
+    </div>
+
+    <div id="menu-model" class="menu" role="menu" hidden>
+      <div class="menu-label">Model</div>
+      <div id="model-items"></div>
+    </div>
+
+    <!-- Row menu for an open task -->
+    <div id="menu-task" class="menu" role="menu" hidden>
+      <button class="menu-item" role="menuitem" data-task-action="edit"><i data-lucide="pencil"></i>Edit</button>
+      <button class="menu-item" role="menuitem" data-task-action="assign"><i data-lucide="user-round"></i>Assign worker</button>
+      <button class="menu-item" role="menuitem" data-task-action="duplicate"><i data-lucide="copy"></i>Duplicate</button>
+      <div class="menu-separator"></div>
+      <button class="menu-item" role="menuitem" data-task-action="planning"><i data-lucide="lightbulb"></i>Move to planning</button>
+      <button class="menu-item" role="menuitem" data-task-action="complete"><i data-lucide="circle-check"></i>Mark complete</button>
+      <button class="menu-item" role="menuitem" data-task-action="archive"><i data-lucide="archive"></i>Archive</button>
+      <div class="menu-separator"></div>
+      <button class="menu-item menu-item-destructive" role="menuitem" data-task-action="delete"><i data-lucide="trash-2"></i>Delete</button>
+    </div>
+
+    <!-- Bulk actions for the selected open tasks -->
+    <div id="menu-bulk" class="menu" role="menu" hidden>
+      <div class="menu-label">Selected tasks</div>
+      <button class="menu-item" role="menuitem" data-task-action="execute"><i data-lucide="play"></i>Start executing</button>
+      <button class="menu-item" role="menuitem" data-task-action="assign"><i data-lucide="user-round"></i>Assign worker</button>
+      <button class="menu-item" role="menuitem" data-task-action="planning"><i data-lucide="lightbulb"></i>Move to planning</button>
+      <button class="menu-item" role="menuitem" data-task-action="complete"><i data-lucide="circle-check"></i>Mark complete</button>
+      <button class="menu-item" role="menuitem" data-task-action="archive"><i data-lucide="archive"></i>Archive</button>
+      <div class="menu-separator"></div>
+      <button class="menu-item menu-item-destructive" role="menuitem" data-task-action="delete"><i data-lucide="trash-2"></i>Delete</button>
+    </div>
+
+    <script>
+      /* ------------------------------------------------------------------ data */
+      const PROJECT = {
+        name: "agent-visual-os",
+        state: "running", // idle | running | blocked | failed
+        branch: "main",
+        branches: ["main", "feature/project-popup", "feature/executor-settings-panel", "fix/terminal-reconnect"],
+      };
+
+      const MODELS = ["Fable 5.1", "Opus 5", "Sonnet 5", "Haiku 4.5"];
+
+      const WORKERS = [
+        { name: "Claude", detail: "Claude Code" },
+        { name: "Codex", detail: "OpenAI Codex CLI" },
+      ];
+
+      const STATE_STYLES = {
+        idle: { label: "Idle", badge: "border-transparent bg-secondary text-secondary-foreground", dot: "bg-muted-foreground" },
+        running: { label: "Running", badge: "badge-success", dot: "bg-emerald-500 animate-pulse" },
+        blocked: { label: "Blocked", badge: "badge-warning", dot: "bg-amber-500" },
+        failed: { label: "Failed", badge: "badge-destructive", dot: "bg-destructive" },
+      };
+
+      const EFFORTS = { XS: "Extra small", S: "Small", M: "Medium", L: "Large", XL: "Extra large", XXL: "Double extra large" };
+
+      // How an open task is progressing. Tokens, started and spent only exist once it has been started.
+      const TASK_STATES = {
+        queued: { label: "Queued", badge: "badge-secondary", icon: "circle-dashed" },
+        executing: { label: "Executing", badge: "badge-success", dot: "bg-emerald-500 animate-pulse" },
+        paused: { label: "Paused", badge: "badge-warning", icon: "pause" },
+      };
+
+      // Tasks are "open" or "done". Planning items are sessions (below), not tasks.
+      let tasks = [
+        { id: 1, status: "open", state: "executing", effort: "L", worker: "Claude", tokens: 31400, started: "40m ago", spent: "32m", title: "Reconnect terminal websocket after network drop", description: "Resume the PTY session and replay buffered output instead of starting a new shell." },
+        { id: 2, status: "open", state: "paused", effort: "M", worker: "Codex", tokens: 9800, started: "3h ago", spent: "14m", title: "Show executor usage limits in the settings panel", description: "Surface remaining 5h and weekly quota next to each executor." },
+        { id: 3, status: "open", state: "queued", effort: "S", worker: "Unassigned", updated: "3h ago", title: "Document the notification center behaviour", description: "Cover toast lifetime, grouping, and read state." },
+        { id: 4, status: "open", state: "queued", effort: "XL", worker: "Unassigned", updated: "5h ago", title: "Rate-limit the executor usage poller", description: "Back off when the provider returns a 429." },
+        { id: 5, status: "open", state: "queued", effort: "XS", worker: "Unassigned", updated: "1d ago", title: "Add empty state to the catalog modal", description: "Show a hint when no templates match the search." },
+        { id: 6, status: "done", effort: "M", worker: "Claude", tokens: 22600, started: "2d ago", spent: "41m", updated: "yesterday", title: "Persist task state across daemon restarts", description: "Tasks now reload from projects.json on boot." },
+        { id: 7, status: "done", effort: "S", worker: "Codex", tokens: 6400, started: "3d ago", spent: "12m", updated: "2d ago", title: "Fix building label overlap at low zoom", description: "Labels fade out below the zoom threshold." },
+        { id: 8, status: "done", effort: "XXL", worker: "Claude", tokens: 184300, started: "5d ago", spent: "3h 26m", updated: "3d ago", title: "Cover the terminal session manager", description: "Added lifecycle and reconnect tests." },
+      ];
+
+      // Ongoing planning sessions.
+      let sessions = [
+        { id: 11, title: "Split the worker manager into scheduler and runner", description: "Drafting the interface boundary before touching any code.", agent: "Claude", tokens: 48200, started: "25m ago", spent: "1h 12m" },
+        { id: 12, title: "Command palette for switching projects", description: "Scoping keyboard shortcuts and search sources.", agent: "Codex", tokens: 12900, started: "2h ago", spent: "18m" },
+        { id: 13, title: "Notification grouping rules", description: "Deciding when repeated events collapse into one toast.", agent: "Claude", tokens: 3100, started: "yesterday", spent: "6m" },
+      ];
+
+      let nextId = 20;
+
+      const SECTIONS = {
+        open: {
+          label: "Open tasks",
+          icon: "circle-dot",
+          description: "Ready to be picked up by a worker.",
+          actions: [
+            { id: "filter", label: "Filter", icon: "list-filter", variant: "outline" },
+            { id: "sort", label: "Sort", icon: "arrow-up-down", variant: "outline" },
+          ],
+        },
+        planning: {
+          label: "Planning",
+          icon: "lightbulb",
+          description: "Ongoing planning sessions.",
+          actions: [],
+        },
+        done: {
+          label: "Completed",
+          icon: "circle-check",
+          description: "Finished work.",
+          actions: [{ id: "clear-done", label: "Clear completed", icon: "trash-2", variant: "outline" }],
+        },
+      };
+
+      // What the chat input does in each section (none on Completed).
+      const PROMPTS = {
+        open: { placeholder: "Describe a new task...", hint: "Enter to send. Creates a new open task." },
+        planning: { placeholder: "What should we plan? This starts a new planning session...", hint: "Enter to send. Starts a new planning session." },
+      };
+
+      // Files browsed on the Code tab.
+      const CODE_TREE = [
+        {
+          name: "server",
+          children: [
+            {
+              name: "src",
+              children: [
+                {
+                  name: "terminal",
+                  children: [
+                    {
+                      name: "terminalSessionManager.ts",
+                      content: [
+                        'import { spawn } from "node-pty";',
+                        "",
+                        "export class TerminalSessionManager {",
+                        "  private sessions = new Map<string, Session>();",
+                        "",
+                        "  open(taskId: string) {",
+                        "    return this.sessions.get(taskId) ?? this.create(taskId);",
+                        "  }",
+                        "}",
+                      ].join("\n"),
+                    },
+                  ],
+                },
+                {
+                  name: "worker",
+                  children: [
+                    {
+                      name: "workerManager.ts",
+                      content: [
+                        "export class WorkerManager {",
+                        "  async start(task: Task) {",
+                        "    const worker = this.createWorker(task);",
+                        "    this.terminals.open(task.id);",
+                        "    await worker.run({ terminal: true });",
+                        "    return worker;",
+                        "  }",
+                        "}",
+                      ].join("\n"),
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: "web",
+          children: [
+            {
+              name: "src",
+              children: [
+                {
+                  name: "ui",
+                  children: [
+                    {
+                      name: "TaskTerminal.tsx",
+                      content: [
+                        'import { Terminal } from "@xterm/xterm";',
+                        "",
+                        "export function TaskTerminal({ taskId }: { taskId: string }) {",
+                        "  const ref = useTerminal(taskId);",
+                        '  return <div ref={ref} className="h-full" />;',
+                        "}",
+                      ].join("\n"),
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: "package.json",
+          content: ["{", '  "name": "agent-visual-os",', '  "private": true,', '  "workspaces": ["server", "web"]', "}"].join("\n"),
+        },
+      ];
+
+      // Only the changed files, and only the changed hunks of each, as one unified diff.
+      const DIFF_FILES = [
+        {
+          path: "server/src/terminal/terminalSessionManager.ts",
+          hunks: [
+            {
+              oldStart: 0,
+              newStart: 1,
+              lines: [
+                ["add", 'import { spawn } from "node-pty";'],
+                ["add", ""],
+                ["add", "export class TerminalSessionManager {"],
+                ["add", "  private sessions = new Map<string, Session>();"],
+                ["add", ""],
+                ["add", "  open(taskId: string) {"],
+                ["add", "    return this.sessions.get(taskId) ?? this.create(taskId);"],
+                ["add", "  }"],
+                ["add", "}"],
+              ],
+            },
+          ],
+        },
+        {
+          path: "server/src/worker/workerManager.ts",
+          hunks: [
+            {
+              oldStart: 41,
+              newStart: 41,
+              lines: [
+                ["ctx", "  async start(task: Task) {"],
+                ["ctx", "    const worker = this.createWorker(task);"],
+                ["del", "    await worker.run();"],
+                ["add", "    this.terminals.open(task.id);"],
+                ["add", "    await worker.run({ terminal: true });"],
+                ["ctx", "    return worker;"],
+                ["ctx", "  }"],
+              ],
+            },
+            {
+              oldStart: 88,
+              newStart: 89,
+              lines: [
+                ["ctx", "  stop(id: string) {"],
+                ["del", "    this.workers.delete(id);"],
+                ["add", "    this.terminals.close(id);"],
+                ["add", "    this.workers.delete(id);"],
+                ["ctx", "  }"],
+              ],
+            },
+          ],
+        },
+        {
+          path: "web/src/ui/TaskTerminal.tsx",
+          hunks: [
+            {
+              oldStart: 0,
+              newStart: 1,
+              lines: [
+                ["add", 'import { Terminal } from "@xterm/xterm";'],
+                ["add", ""],
+                ["add", "export function TaskTerminal({ taskId }: { taskId: string }) {"],
+                ["add", "  const ref = useTerminal(taskId);"],
+                ["add", '  return <div ref={ref} className="h-full" />;'],
+                ["add", "}"],
+              ],
+            },
+          ],
+        },
+      ];
+
+      // Contents of the project's .docs folder. A node with `children` is a folder, otherwise a file.
+      const DOC_TREE = [
+        {
+          name: "architecture",
+          children: [
+            {
+              name: "overview.md",
+              content: "# Architecture overview\n\nThe daemon owns all runtime state. The web app is a thin client that talks to it over HTTP and WebSocket.\n\n## Components\n\n- **Daemon** orchestrates workers and persists state.\n- **Worker** is one `claude -p` subprocess bound to a task.\n- **Catalog** lists the templates a project can be created from.\n\n## Request flow\n\n1. The UI sends a command to the daemon.\n2. The daemon validates it and updates the runtime store.\n3. Changes are pushed back to every connected client.\n\n> State is never duplicated in the client. It only mirrors what the daemon last sent.",
+            },
+            {
+              name: "worker-model.md",
+              content: "# Worker model\n\nEach task runs in its own worker. Workers are disposable; the task record is not.\n\n## Lifecycle\n\n1. `queued`\n2. `running`\n3. `done` or `failed`\n\n```ts\ntype WorkerState = \"queued\" | \"running\" | \"done\" | \"failed\";\n```\n\nA failed worker keeps its transcript so the task can be retried with context.",
+            },
+          ],
+        },
+        {
+          name: "guides",
+          children: [
+            {
+              name: "getting-started.md",
+              content: "# Getting started\n\nInstall dependencies and start both apps from the repository root.\n\n```bash\nnpm install\nnpm run dev\n```\n\n## Requirements\n\n- Node 20 or newer\n- The `claude` CLI on your `PATH`",
+            },
+            {
+              name: "executors.md",
+              content: "# Executors\n\nAn executor is the CLI a worker shells out to. Usage limits are read per executor and shown in settings.\n\n## Adding an executor\n\n1. Add its definition to the executor list.\n2. Provide a usage reader.\n3. Expose it in the settings panel.",
+            },
+          ],
+        },
+        {
+          name: "decisions",
+          children: [
+            {
+              name: "0001-central-runtime-store.md",
+              content: "# 0001. Central runtime store\n\n**Status:** accepted\n\n## Context\n\nSession state was scattered across workers and the UI, which made recovery after a restart unreliable.\n\n## Decision\n\nKeep one runtime store in the daemon and treat everything else as a view of it.",
+            },
+          ],
+        },
+        {
+          name: "README.md",
+          content: "# Project docs\n\nNotes, guides and decisions for this project. Everything here lives in the `.docs` folder and is versioned with the code.\n\n## Where to start\n\n- Read [the architecture overview](architecture/overview.md) first.\n- Use the guides for day-to-day setup.\n- Record significant choices under `decisions`.",
+        },
+      ];
+
+      const COMMAND_HISTORY = [
+        { command: "npm run dev", title: "Start dev server", ok: true, started: "12m ago", duration: "still running" },
+        { command: "npm test", title: "Run tests", ok: false, started: "1h ago", duration: "3m 04s", exit: 1 },
+        { command: "npm run build", title: "Build", ok: true, started: "3h ago", duration: "48s" },
+        { command: "npm test", title: "Run tests", ok: true, started: "yesterday", duration: "2m 51s" },
+        { command: "npm run lint", title: "Lint", ok: true, started: "yesterday", duration: "9s" },
+      ];
+
+      const trailingBadge = (text) => `<span class="badge badge-secondary">${text}</span>`;
+      const trailingButton = (icon, text) => `<button class="btn btn-outline btn-sm"><i data-lucide="${icon}"></i>${text}</button>`;
+      const mono = (text) => `<code class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">${text}</code>`;
+
+      const PANELS = {
+        testing: {
+          title: "Testing",
+          description: "Latest results from the test suite.",
+          action: trailingButton("play", "Run tests"),
+          stats: [
+            { label: "Passed", value: "128", hint: "across 24 files" },
+            { label: "Failed", value: "2", hint: "in worker manager" },
+            { label: "Coverage", value: "94%", hint: "target 90%" },
+          ],
+          rows: [
+            { icon: "circle-check", title: "server / unit", meta: "84 tests, 3.2s", trailing: trailingBadge("Passed") },
+            { icon: "circle-x", title: "server / workerManager", meta: "2 failing", trailing: trailingBadge("Failed") },
+            { icon: "circle-check", title: "web / store", meta: "44 tests, 1.1s", trailing: trailingBadge("Passed") },
+          ],
+        },
+      };
+
+      /* --------------------------------------------------------------- helpers */
+      const $ = (selector, root = document) => root.querySelector(selector);
+      const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+      const byId = (id) => document.getElementById(id);
+      const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+      const refreshIcons = () => lucide.createIcons();
+      const plural = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+      const formatTokens = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+
+      const iconButton = ({ icon, label, attrs = "", extra = "" }) =>
+        `<button class="btn btn-ghost btn-icon-sm ${extra}" aria-label="${label}" title="${label}" ${attrs}><i data-lucide="${icon}"></i></button>`;
+      const tag = (icon, text) => `<span class="badge badge-outline text-muted-foreground"><i data-lucide="${icon}"></i>${text}</span>`;
+
+      /* ----------------------------------------------------------------- theme */
+      byId("theme-toggle").addEventListener("click", () => {
+        const dark = document.documentElement.classList.toggle("dark");
+        try {
+          localStorage.setItem("theme", dark ? "dark" : "light");
+        } catch (e) {}
+      });
+
+      /* ------------------------------------------------------------ popup open */
+      const setPopupOpen = (open) => {
+        byId("popup-overlay").hidden = !open;
+        byId("popup-open").parentElement.hidden = open;
+      };
+      byId("popup-close").addEventListener("click", () => setPopupOpen(false));
+      byId("popup-open").addEventListener("click", () => setPopupOpen(true));
+      byId("popup-overlay").addEventListener("mousedown", (event) => {
+        if (event.target === event.currentTarget) setPopupOpen(false);
+      });
+      setPopupOpen(true);
+
+      /* ---------------------------------------------------------------- header */
+      function renderHeader() {
+        const style = STATE_STYLES[PROJECT.state];
+        byId("project-name").textContent = PROJECT.name;
+        const badge = byId("project-state");
+        badge.className = `badge ${style.badge}`;
+        badge.innerHTML = `<span class="size-1.5 rounded-full ${style.dot}"></span>${style.label}`;
+        byId("branch-label").textContent = PROJECT.branch;
+      }
+
+      /* -------------------------------------------------------- branch switcher */
+      const branchSearch = byId("branch-search");
+      const toBranchName = (query) => query.trim().replace(/\s+/g, "-");
+
+      function renderBranchItems() {
+        const query = branchSearch.value.trim().toLowerCase();
+        const matches = PROJECT.branches.filter((branch) => branch.toLowerCase().includes(query));
+        const name = toBranchName(branchSearch.value);
+        const canCreate = name && !PROJECT.branches.some((branch) => branch.toLowerCase() === name.toLowerCase());
+
+        const branchItems = matches.map(
+          (branch) => `
+            <button class="menu-item" role="menuitemradio" aria-checked="${branch === PROJECT.branch}" data-branch="${escapeHtml(branch)}">
+              <i data-lucide="git-branch"></i><span class="truncate">${escapeHtml(branch)}</span>
+              ${branch === PROJECT.branch ? '<i data-lucide="check" class="ml-auto"></i>' : ""}
+            </button>`,
+        );
+        const createItem = canCreate
+          ? `${matches.length ? '<div class="menu-separator"></div>' : ""}
+             <button class="menu-item" role="menuitem" data-branch-create="${escapeHtml(name)}">
+               <i data-lucide="git-branch-plus"></i><span class="truncate">Create branch <strong class="font-medium">${escapeHtml(name)}</strong></span>
+             </button>`
+          : "";
+
+        byId("branch-items").innerHTML =
+          (matches.length ? `<div class="menu-label">Branches</div>${branchItems.join("")}` : "") + createItem;
+        refreshIcons();
+      }
+
+      branchSearch.addEventListener("input", renderBranchItems);
+      branchSearch.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        $("[data-branch], [data-branch-create]", byId("branch-items"))?.click();
+      });
+
+      function switchBranch(name) {
+        if (!PROJECT.branches.includes(name)) PROJECT.branches.push(name);
+        PROJECT.branch = name;
+        renderHeader();
+      }
+
+      /* ----------------------------------------------------------------- model */
+      let selectedModel = "Sonnet 5";
+      function renderModels() {
+        byId("model-label").textContent = selectedModel;
+        byId("model-items").innerHTML = MODELS.map(
+          (model) => `
+            <button class="menu-item" role="menuitemradio" aria-checked="${model === selectedModel}" data-model="${model}">
+              ${model}${model === selectedModel ? '<i data-lucide="check" class="ml-auto"></i>' : ""}
+            </button>`,
+        ).join("");
+      }
+
+      /* ------------------------------------------------------------------ tabs */
+      const tabTriggers = $$("[data-tab]");
+      function selectTab(name) {
+        tabTriggers.forEach((trigger) => {
+          const active = trigger.dataset.tab === name;
+          trigger.dataset.state = active ? "active" : "inactive";
+          trigger.setAttribute("aria-selected", active);
+          trigger.tabIndex = active ? 0 : -1;
+        });
+        $$("[data-tab-panel]").forEach((panel) => {
+          panel.hidden = panel.dataset.tabPanel !== name;
+        });
+      }
+      tabTriggers.forEach((trigger, index) => {
+        trigger.addEventListener("click", () => selectTab(trigger.dataset.tab));
+        trigger.addEventListener("keydown", (event) => {
+          const step = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
+          if (!step) return;
+          const next = tabTriggers[(index + step + tabTriggers.length) % tabTriggers.length];
+          next.focus();
+          selectTab(next.dataset.tab);
+        });
+      });
+
+      /* ----------------------------------------------------------------- modal */
+      let modalConfirm = null;
+
+      function openModal({ title, description, body = "", confirmLabel, destructive = false, onConfirm }) {
+        byId("modal-title").textContent = title;
+        byId("modal-desc").textContent = description;
+        byId("modal-body").innerHTML = body;
+        const confirm = byId("modal-confirm");
+        confirm.textContent = confirmLabel;
+        confirm.className = `btn ${destructive ? "btn-destructive" : "btn-default"}`;
+        modalConfirm = onConfirm;
+        byId("modal-overlay").hidden = false;
+        ($("input", byId("modal-body")) || confirm).focus();
+      }
+
+      function closeModal() {
+        byId("modal-overlay").hidden = true;
+        modalConfirm = null;
+      }
+
+      byId("modal-cancel").addEventListener("click", closeModal);
+      byId("modal-confirm").addEventListener("click", () => {
+        const confirm = modalConfirm;
+        closeModal();
+        if (confirm) confirm();
+      });
+      byId("modal-overlay").addEventListener("mousedown", (event) => {
+        if (event.target === event.currentTarget) closeModal();
+      });
+
+      const workerRadios = () =>
+        `<div class="grid gap-2" role="radiogroup" aria-label="Worker">
+          ${WORKERS.map(
+            (worker, index) => `
+              <label class="flex cursor-pointer items-center gap-3 rounded-lg border p-3 has-[:checked]:border-primary/50 has-[:checked]:bg-accent">
+                <input type="radio" name="worker" value="${worker.name}" class="peer sr-only" ${index === 0 ? "checked" : ""} />
+                <span class="flex size-4 shrink-0 items-center justify-center rounded-full border border-input shadow-xs peer-checked:border-primary peer-focus-visible:ring-[3px] peer-focus-visible:ring-ring/50 peer-checked:[&>span]:opacity-100">
+                  <span class="size-2 rounded-full bg-primary opacity-0"></span>
+                </span>
+                <span class="grid">
+                  <span class="text-sm font-medium">${worker.name}</span>
+                  <span class="text-xs text-muted-foreground">${worker.detail}</span>
+                </span>
+              </label>`,
+          ).join("")}
+        </div>`;
+
+      /* ----------------------------------------------------------------- tasks */
+      let activeSection = "open";
+      const selected = new Set(); // ids of selected open tasks (bulk actions)
+
+      const tasksWith = (status) => tasks.filter((task) => task.status === status && !task.archived);
+      const activeSessions = () => sessions.filter((session) => !session.archived);
+      const findTask = (id) => tasks.find((task) => task.id === id);
+      const forTasks = (ids, update) => ids.forEach((id) => update(findTask(id)));
+      const countFor = (key) => (key === "planning" ? activeSessions().length : tasksWith(key).length);
+
+      function renderSidebar() {
+        byId("task-nav").innerHTML = Object.entries(SECTIONS)
+          .map(
+            ([key, section]) => `
+              <button class="btn btn-ghost w-full justify-start data-[active=true]:bg-accent data-[active=true]:font-semibold"
+                      data-section="${key}" data-active="${key === activeSection}" aria-current="${key === activeSection}">
+                <i data-lucide="${section.icon}"></i>
+                <span>${section.label}</span>
+                <span class="ml-auto text-xs font-normal text-muted-foreground">${countFor(key)}</span>
+              </button>`,
+          )
+          .join("");
+
+        const done = countFor("done");
+        const total = done + countFor("open");
+        byId("progress-label").textContent = `${done} of ${total} done`;
+        byId("progress-bar").style.width = `${total ? (done / total) * 100 : 0}%`;
+      }
+
+      function renderSectionHeader() {
+        const section = SECTIONS[activeSection];
+        byId("section-title").textContent = section.label;
+        byId("section-desc").textContent = section.description;
+
+        const bulk =
+          activeSection === "open" && selected.size
+            ? `<button class="btn btn-default btn-sm" data-menu-target="menu-bulk" data-align="end" aria-haspopup="menu" aria-expanded="false">
+                 <i data-lucide="list-checks"></i>${selected.size} selected<i data-lucide="chevron-down" class="!size-3.5"></i>
+               </button>`
+            : "";
+        byId("section-actions").innerHTML =
+          bulk +
+          section.actions
+            .map(
+              (action) => `
+                <button class="btn btn-${action.variant} btn-sm" data-action="${action.id}">
+                  <i data-lucide="${action.icon}"></i><span class="hidden sm:inline">${action.label}</span>
+                </button>`,
+            )
+            .join("");
+      }
+
+      // Select-all row, shown on Open tasks only.
+      function renderTaskToolbar() {
+        const items = tasksWith("open");
+        const toolbar = byId("task-toolbar");
+        toolbar.hidden = activeSection !== "open" || !items.length;
+        if (toolbar.hidden) return;
+
+        const count = items.filter((task) => selected.has(task.id)).length;
+        const state = count === 0 ? "unchecked" : count === items.length ? "checked" : "indeterminate";
+        toolbar.innerHTML = `
+          <div class="flex items-center gap-3 pb-2 pl-[13px]">
+            <button class="checkbox" role="checkbox" aria-label="Select all tasks" aria-checked="${state === "indeterminate" ? "mixed" : state === "checked"}"
+                    data-state="${state}" data-select-all>
+              <i data-lucide="${state === "indeterminate" ? "minus" : "check"}"></i>
+            </button>
+            <span class="text-sm text-muted-foreground">${count ? `${count} of ${items.length} selected` : "Select all"}</span>
+          </div>`;
+      }
+
+      // Every row shows its title and a faded summary line; on hover or focus the summary is
+      // replaced by the description and tags.
+      const rowShell = ({ attrs, lead, title, description, tags, actions, summary }) => {
+        const details = `
+          <p class="mt-0.5 truncate text-sm text-muted-foreground">${escapeHtml(description)}</p>
+          <div class="mt-2 flex flex-wrap items-center gap-1.5">${tags}</div>`;
+        const body = `<div class="grid grid-rows-[1fr] transition-[grid-template-rows,opacity] duration-200 group-focus-within:grid-rows-[0fr] group-focus-within:opacity-0 group-hover:grid-rows-[0fr] group-hover:opacity-0">
+               <div class="min-h-0 overflow-hidden"><p class="truncate text-xs text-muted-foreground">${summary}</p></div>
+             </div>
+             <div class="grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 group-focus-within:grid-rows-[1fr] group-focus-within:opacity-100 group-hover:grid-rows-[1fr] group-hover:opacity-100">
+               <div class="min-h-0 overflow-hidden">${details}</div>
+             </div>`;
+        return `
+          <li class="group flex items-start gap-3 rounded-lg border bg-card p-3 text-card-foreground transition-colors hover:bg-accent/40 data-[selected=true]:border-primary/40 data-[selected=true]:bg-accent/50" ${attrs}>
+            ${lead}
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm leading-6 font-medium">${escapeHtml(title)}</p>
+              ${body}
+            </div>
+            <div class="-my-1 -mr-1 flex shrink-0 items-center gap-1">${actions}</div>
+          </li>`;
+      };
+
+      const statusTag = (state) => {
+        const { label, badge, dot, icon } = TASK_STATES[state];
+        const lead = dot ? `<span class="size-1.5 rounded-full ${dot}"></span>` : `<i data-lucide="${icon}"></i>`;
+        return `<span class="badge ${badge}">${lead}${label}</span>`;
+      };
+      const effortTag = (effort) =>
+        `<span class="badge badge-outline font-mono" title="Effort: ${EFFORTS[effort]}"><i data-lucide="gauge"></i>${effort}</span>`;
+      const sessionMetrics = ({ tokens, started, spent }) =>
+        `${tag("zap", `${formatTokens(tokens)} tokens`)}${tag("clock", `Started ${escapeHtml(started)}`)}${tag("timer", `${escapeHtml(spent)} spent`)}`;
+
+      // Executing tasks can be paused; queued and paused ones can be started or resumed.
+      const taskRunButton = (task) =>
+        task.state === "executing"
+          ? iconButton({ icon: "pause", label: "Pause", attrs: 'data-task-action="pause"' })
+          : iconButton({ icon: "play", label: task.state === "paused" ? "Resume" : "Start executing", attrs: 'data-task-action="execute"' });
+
+      // Plain-text summary shown while a row is collapsed: worker • size • tokens • created/started.
+      const summaryLine = (...parts) =>
+        parts.filter(Boolean).map(escapeHtml).join('<span class="mx-1.5" aria-hidden="true">•</span>');
+      const taskSummary = (task) => {
+        const started = task.started !== undefined;
+        return summaryLine(
+          task.worker,
+          `Size ${task.effort}`,
+          started && `${formatTokens(task.tokens)} tokens`,
+          started ? `Started ${task.started}` : `Created ${task.updated}`,
+        );
+      };
+
+      const openTaskRow = (task) => {
+        const checked = selected.has(task.id);
+        const started = task.started !== undefined;
+        return rowShell({
+          attrs: `data-task-id="${task.id}" data-selected="${checked}"`,
+          summary: taskSummary(task),
+          lead: `<button class="checkbox mt-1" role="checkbox" aria-checked="${checked}" aria-label="Select task"
+                         data-state="${checked ? "checked" : "unchecked"}" data-task-select><i data-lucide="check"></i></button>`,
+          title: task.title,
+          description: task.description,
+          tags: `
+            ${statusTag(task.state)}
+            ${tag("bot", escapeHtml(task.worker))}
+            ${effortTag(task.effort)}
+            ${started ? sessionMetrics(task) : `<span class="ml-1 text-xs text-muted-foreground">Created ${escapeHtml(task.updated)}</span>`}`,
+          actions: `
+            ${taskRunButton(task)}
+            <button class="btn btn-ghost btn-icon-sm" aria-label="Task options" aria-haspopup="menu" aria-expanded="false" data-menu-target="menu-task" data-align="end">
+              <i data-lucide="ellipsis"></i>
+            </button>`,
+        });
+      };
+
+      const doneTaskRow = (task) =>
+        rowShell({
+          attrs: `data-task-id="${task.id}"`,
+          summary: taskSummary(task),
+          lead: '<i data-lucide="circle-check" class="mt-1 size-4 shrink-0 text-emerald-600 dark:text-emerald-400"></i>',
+          title: task.title,
+          description: task.description,
+          tags: `
+            ${tag("bot", escapeHtml(task.worker))}
+            ${effortTag(task.effort)}
+            ${sessionMetrics(task)}
+            <span class="ml-1 text-xs text-muted-foreground">Completed ${escapeHtml(task.updated)}</span>`,
+          actions: `
+            <button class="btn btn-outline btn-sm" data-task-action="open-session"><i data-lucide="message-square-text"></i>Open session</button>
+            ${iconButton({ icon: "trash-2", label: "Delete", extra: "hover:text-destructive", attrs: 'data-task-action="delete"' })}`,
+        });
+
+      const sessionRow = (session) =>
+        rowShell({
+          attrs: `data-session-id="${session.id}"`,
+          summary: summaryLine(session.agent, `${formatTokens(session.tokens)} tokens`, `Started ${session.started}`, `${session.spent} spent`),
+          lead: '<span class="mt-1 flex size-4 shrink-0 items-center justify-center" title="Ongoing"><span class="size-2 animate-pulse rounded-full bg-emerald-500"></span></span>',
+          title: session.title,
+          description: session.description,
+          tags: `
+            ${tag("bot", escapeHtml(session.agent))}
+            ${sessionMetrics(session)}`,
+          actions: `
+            <button class="btn btn-outline btn-sm" data-session-action="open"><i data-lucide="external-link"></i>Open</button>
+            ${iconButton({ icon: "archive", label: "Archive", attrs: 'data-session-action="archive"' })}
+            ${iconButton({ icon: "trash-2", label: "Delete", extra: "hover:text-destructive", attrs: 'data-session-action="delete"' })}`,
+        });
+
+      const ROW_RENDERERS = {
+        open: () => tasksWith("open").map(openTaskRow),
+        planning: () => activeSessions().map(sessionRow),
+        done: () => tasksWith("done").map(doneTaskRow),
+      };
+
+      function renderTaskList() {
+        const rows = ROW_RENDERERS[activeSection]();
+        byId("task-list").innerHTML = rows.length
+          ? rows.join("")
+          : `<li class="flex h-full min-h-40 flex-col items-center justify-center gap-1 rounded-lg border border-dashed text-center">
+               <p class="text-sm font-medium">Nothing here yet</p>
+               <p class="text-sm text-muted-foreground">${PROMPTS[activeSection] ? "Use the prompt below to get started." : "Finished tasks will show up here."}</p>
+             </li>`;
+      }
+
+      function renderPrompt() {
+        const prompt = PROMPTS[activeSection];
+        byId("prompt-wrap").hidden = !prompt;
+        if (!prompt) return;
+        promptInput.placeholder = prompt.placeholder;
+        byId("prompt-hint").textContent = prompt.hint;
+      }
+
+      function renderTasks() {
+        const openIds = new Set(tasksWith("open").map((task) => task.id));
+        selected.forEach((id) => openIds.has(id) || selected.delete(id));
+        renderSidebar();
+        renderSectionHeader();
+        renderTaskToolbar();
+        renderTaskList();
+        renderPrompt();
+        refreshIcons();
+      }
+
+      /* Task actions. Each takes the ids it applies to, so the row menu and the bulk menu share them. */
+      const ensureStarted = (task) => {
+        if (task.started === undefined) Object.assign(task, { tokens: 0, started: "just now", spent: "0m" });
+      };
+
+      const TASK_ACTIONS = {
+        execute: (ids) =>
+          forTasks(ids, (task) => {
+            ensureStarted(task);
+            task.state = "executing";
+          }),
+        pause: (ids) => forTasks(ids, (task) => task.state === "executing" && (task.state = "paused")),
+        complete: (ids) =>
+          forTasks(ids, (task) => {
+            ensureStarted(task);
+            task.status = "done";
+            task.updated = "just now";
+          }),
+        archive: (ids) => forTasks(ids, (task) => (task.archived = true)),
+        duplicate: (ids) =>
+          forTasks(ids, (task) =>
+            tasks.push({ id: nextId++, status: "open", state: "queued", effort: task.effort, worker: task.worker, title: `${task.title} (copy)`, description: task.description, updated: "just now" }),
+          ),
+        planning: (ids) => {
+          forTasks(ids, (task) =>
+            sessions.unshift({
+              id: nextId++,
+              title: task.title,
+              description: task.description,
+              agent: task.worker === "Unassigned" ? "Claude" : task.worker,
+              tokens: 0,
+              started: "just now",
+              spent: "0m",
+            }),
+          );
+          tasks = tasks.filter((task) => !ids.includes(task.id));
+        },
+        edit: () => {},
+        "open-session": () => {},
+      };
+
+      // Actions that need a confirmation or extra input first open a dialog.
+      const TASK_DIALOGS = {
+        delete: (ids) => ({
+          title: `Delete ${plural(ids.length, "task")}?`,
+          description: "This can't be undone.",
+          confirmLabel: "Delete",
+          destructive: true,
+          apply: () => (tasks = tasks.filter((task) => !ids.includes(task.id))),
+        }),
+        assign: (ids) => ({
+          title: "Assign worker",
+          description: `Choose who should work on ${plural(ids.length, "task")}.`,
+          body: workerRadios(),
+          confirmLabel: "Assign",
+          apply: () => {
+            const worker = $('input[name="worker"]:checked').value;
+            forTasks(ids, (task) => (task.worker = worker));
+          },
+        }),
+      };
+
+      function runTaskAction(action, ids, { clearSelection = false } = {}) {
+        const dialog = TASK_DIALOGS[action] && TASK_DIALOGS[action](ids);
+        const commit = () => {
+          if (dialog) dialog.apply();
+          else if (TASK_ACTIONS[action]) TASK_ACTIONS[action](ids);
+          if (clearSelection) selected.clear();
+          renderTasks();
+        };
+        if (dialog) openModal({ ...dialog, onConfirm: commit });
+        else commit();
+      }
+
+      const SESSION_ACTIONS = {
+        open: () => {},
+        archive: (id) => (sessions.find((session) => session.id === id).archived = true),
+        delete: (id) =>
+          openModal({
+            title: "Delete planning session?",
+            description: "The session and its history will be removed. This can't be undone.",
+            confirmLabel: "Delete",
+            destructive: true,
+            onConfirm: () => {
+              sessions = sessions.filter((session) => session.id !== id);
+              renderTasks();
+            },
+          }),
+      };
+
+      const SECTION_ACTIONS = {
+        "clear-done": () =>
+          runTaskAction(
+            "delete",
+            tasksWith("done").map((task) => task.id),
+          ),
+      };
+
+      byId("task-nav").addEventListener("click", (event) => {
+        const item = event.target.closest("[data-section]");
+        if (!item) return;
+        activeSection = item.dataset.section;
+        selected.clear();
+        renderTasks();
+      });
+
+      byId("section-actions").addEventListener("click", (event) => {
+        const button = event.target.closest("[data-action]");
+        const handler = button && SECTION_ACTIONS[button.dataset.action];
+        if (handler) handler();
+      });
+
+      byId("task-toolbar").addEventListener("click", (event) => {
+        if (!event.target.closest("[data-select-all]")) return;
+        const ids = tasksWith("open").map((task) => task.id);
+        const all = ids.every((id) => selected.has(id));
+        ids.forEach((id) => (all ? selected.delete(id) : selected.add(id)));
+        renderTasks();
+      });
+
+      byId("task-list").addEventListener("click", (event) => {
+        const row = event.target.closest("[data-task-id], [data-session-id]");
+        if (!row) return;
+
+        if (event.target.closest("[data-task-select]")) {
+          const id = Number(row.dataset.taskId);
+          selected.has(id) ? selected.delete(id) : selected.add(id);
+          renderTasks();
+          return;
+        }
+        const taskAction = event.target.closest("[data-task-action]");
+        if (taskAction) runTaskAction(taskAction.dataset.taskAction, [Number(row.dataset.taskId)]);
+
+        const sessionAction = event.target.closest("[data-session-action]");
+        if (sessionAction) {
+          SESSION_ACTIONS[sessionAction.dataset.sessionAction](Number(row.dataset.sessionId));
+          renderTasks();
+        }
+      });
+
+      /* ------------------------------------------------------------ AI prompt */
+      const promptInput = byId("prompt-input");
+      const promptSend = byId("prompt-send");
+
+      function syncPromptInput() {
+        promptInput.style.height = "auto";
+        promptInput.style.height = `${promptInput.scrollHeight}px`;
+        promptSend.disabled = !promptInput.value.trim();
+      }
+
+      // Open tasks: the message becomes a new task. Planning: it starts a new planning session.
+      const PROMPT_SUBMIT = {
+        open: (text) =>
+          tasks.unshift({ id: nextId++, status: "open", state: "queued", effort: "M", worker: "Unassigned", updated: "just now", title: text, description: `Created with ${selectedModel}.` }),
+        planning: (text) =>
+          sessions.unshift({ id: nextId++, title: text, description: `Planning session with ${selectedModel}.`, agent: "Claude", tokens: 0, started: "just now", spent: "0m" }),
+      };
+
+      function submitPrompt() {
+        const text = promptInput.value.trim();
+        const submit = PROMPT_SUBMIT[activeSection];
+        if (!text || !submit) return;
+        submit(text);
+        promptInput.value = "";
+        syncPromptInput();
+        renderTasks();
+      }
+
+      promptInput.addEventListener("input", syncPromptInput);
+      promptInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+          event.preventDefault();
+          submitPrompt();
+        }
+      });
+      byId("prompt-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        submitPrompt();
+      });
+
+      /* ------------------------------------------- file browsers (Docs, Code) */
+      const browsers = {
+        documents: {
+          rootLabel: ".docs",
+          tree: DOC_TREE,
+          selected: "README.md",
+          expanded: new Set(),
+          mode: "view", // view | edit
+          toolbar: (b) =>
+            b.mode === "edit"
+              ? `<button class="btn btn-ghost btn-sm" data-browser-action="cancel"><i data-lucide="x"></i>Cancel</button>
+                 <button class="btn btn-default btn-sm" data-browser-action="save"><i data-lucide="check"></i>Save</button>`
+              : `<button class="btn btn-outline btn-sm" data-browser-action="edit"><i data-lucide="pencil"></i>Edit</button>`,
+          body: (b, node, key) =>
+            b.mode === "edit"
+              ? `<textarea id="${key}-editor" aria-label="Edit markdown" spellcheck="false"
+                   class="mx-auto min-h-96 w-full max-w-3xl flex-1 resize-none rounded-md border bg-transparent p-4 font-mono text-sm leading-6 shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50">${escapeHtml(node.content)}</textarea>`
+              : `<article class="doc-content mx-auto w-full max-w-3xl">${renderMarkdown(node.content)}</article>`,
+        },
+        code: {
+          rootLabel: PROJECT.name,
+          tree: CODE_TREE,
+          selected: "package.json",
+          expanded: new Set(),
+          mode: "view", // view | diff
+          path: (b) => (b.mode === "diff" ? diffSummary() : null),
+          toolbar: (b) =>
+            b.mode === "diff"
+              ? `<button class="btn btn-outline btn-sm" data-browser-action="close-diff"><i data-lucide="file-code"></i>Back to files</button>`
+              : `<button class="btn btn-outline btn-sm" data-browser-action="view-diff"><i data-lucide="git-compare"></i>View diff</button>`,
+          body: (b, node) => (b.mode === "diff" ? renderDiff() : renderCode(node.content)),
+        },
+      };
+
+      const BROWSER_ACTIONS = {
+        edit: (b) => (b.mode = "edit"),
+        cancel: (b) => (b.mode = "view"),
+        save: (b, key) => {
+          findNode(b.tree, b.selected).content = byId(`${key}-editor`).value;
+          b.mode = "view";
+        },
+        "view-diff": (b) => (b.mode = "diff"),
+        "close-diff": (b) => (b.mode = "view"),
+        "new-file": () => {},
+        "new-folder": () => {},
+      };
+
+      const treeIconButton = (icon, label, action) =>
+        `<button class="btn btn-ghost size-6 p-0 text-muted-foreground [&_svg]:!size-3.5" data-browser-action="${action}" aria-label="${label}" title="${label}"><i data-lucide="${icon}"></i></button>`;
+
+      // Left: tree (with small right-aligned new file / folder icons). Right: path, actions, content.
+      const browserShell = (key, rootLabel) => `
+        <aside class="flex max-h-56 shrink-0 flex-col gap-2 border-b bg-muted/30 p-3 md:max-h-none md:w-64 md:border-r md:border-b-0">
+          <div class="flex items-center justify-between pl-2">
+            <span class="flex min-w-0 items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <i data-lucide="folder-tree" class="size-3.5 shrink-0"></i><span class="truncate">${escapeHtml(rootLabel)}</span>
+            </span>
+            <div class="flex shrink-0 items-center">
+              ${treeIconButton("file-plus", "New file", "new-file")}
+              ${treeIconButton("folder-plus", "New folder", "new-folder")}
+            </div>
+          </div>
+          <ul id="${key}-tree" class="min-h-0 flex-1 space-y-0.5 overflow-y-auto" role="tree" aria-label="${escapeHtml(rootLabel)}"></ul>
+        </aside>
+        <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div class="flex items-center justify-between gap-4 border-b px-4 py-2.5 sm:px-6">
+            <nav id="${key}-path" class="flex min-w-0 items-center gap-1 text-sm text-muted-foreground" aria-label="File path"></nav>
+            <div id="${key}-actions" class="flex shrink-0 items-center gap-2"></div>
+          </div>
+          <div id="${key}-body" class="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-6 sm:px-8"></div>
+        </div>`;
+
+      function findNode(nodes, path, prefix = "") {
+        for (const node of nodes) {
+          const nodePath = prefix + node.name;
+          if (!node.children) {
+            if (nodePath === path) return node;
+          } else {
+            const found = findNode(node.children, path, `${nodePath}/`);
+            if (found) return found;
+          }
+        }
+        return null;
+      }
+
+      function renderTreeNodes(b, nodes, prefix = "", depth = 0) {
+        return nodes
+          .map((node) => {
+            const path = prefix + node.name;
+            const indent = `style="padding-left:${8 + depth * 16}px"`;
+            if (!node.children) {
+              return `
+                <li role="none">
+                  <button class="tree-item" role="treeitem" ${indent} data-browser-file="${escapeHtml(path)}" data-active="${path === b.selected}">
+                    <i data-lucide="file-text"></i><span class="truncate">${escapeHtml(node.name)}</span>
+                  </button>
+                </li>`;
+            }
+            const open = b.expanded.has(path);
+            return `
+              <li role="none">
+                <button class="tree-item" role="treeitem" ${indent} data-browser-folder="${escapeHtml(path)}" aria-expanded="${open}">
+                  <i data-lucide="chevron-right" class="!size-3.5 transition-transform ${open ? "rotate-90" : ""}"></i>
+                  <i data-lucide="${open ? "folder-open" : "folder"}"></i><span class="truncate">${escapeHtml(node.name)}</span>
+                </button>
+                ${open ? `<ul role="group" class="mt-0.5 space-y-0.5">${renderTreeNodes(b, node.children, `${path}/`, depth + 1)}</ul>` : ""}
+              </li>`;
+          })
+          .join("");
+      }
+
+      function breadcrumb(b) {
+        return [b.rootLabel, ...b.selected.split("/")]
+          .map((segment, index, all) =>
+            index === all.length - 1
+              ? `<span class="truncate font-medium text-foreground">${escapeHtml(segment)}</span>`
+              : `<span class="truncate">${escapeHtml(segment)}</span><i data-lucide="chevron-right" class="size-3.5 shrink-0"></i>`,
+          )
+          .join("");
+      }
+
+      function renderBrowser(key) {
+        const b = browsers[key];
+        byId(`${key}-tree`).innerHTML = renderTreeNodes(b, b.tree);
+        byId(`${key}-path`).innerHTML = (b.path && b.path(b)) || breadcrumb(b);
+        byId(`${key}-actions`).innerHTML = b.toolbar(b);
+        byId(`${key}-body`).innerHTML = b.body(b, findNode(b.tree, b.selected), key);
+        refreshIcons();
+      }
+
+      Object.entries(browsers).forEach(([key, b]) => {
+        const panel = $(`[data-tab-panel="${key}"]`);
+        panel.innerHTML = browserShell(key, b.rootLabel);
+        panel.addEventListener("click", (event) => {
+          const folder = event.target.closest("[data-browser-folder]");
+          const file = event.target.closest("[data-browser-file]");
+          const action = event.target.closest("[data-browser-action]");
+          if (folder) {
+            const path = folder.dataset.browserFolder;
+            b.expanded.has(path) ? b.expanded.delete(path) : b.expanded.add(path);
+          } else if (file) {
+            b.selected = file.dataset.browserFile;
+            b.mode = "view";
+          } else if (action && BROWSER_ACTIONS[action.dataset.browserAction]) {
+            BROWSER_ACTIONS[action.dataset.browserAction](b, key);
+          } else return;
+          renderBrowser(key);
+        });
+      });
+
+      /* ------------------------------------------------------------- markdown */
+      function renderMarkdown(source) {
+        const inline = (text) =>
+          escapeHtml(text)
+            .replace(/`([^`]+)`/g, "<code>$1</code>")
+            .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+            .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+        const out = [];
+        let paragraph = [];
+        let list = null;
+        let code = null;
+        const flushParagraph = () => {
+          if (paragraph.length) out.push(`<p>${inline(paragraph.join(" "))}</p>`);
+          paragraph = [];
+        };
+        const flushList = () => {
+          if (list) out.push(`<${list.tag}>${list.items.map((item) => `<li>${inline(item)}</li>`).join("")}</${list.tag}>`);
+          list = null;
+        };
+        const flush = () => {
+          flushParagraph();
+          flushList();
+        };
+
+        for (const line of source.split("\n")) {
+          if (code) {
+            if (line.startsWith("```")) {
+              out.push(`<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`);
+              code = null;
+            } else code.push(line);
+            continue;
+          }
+          let match;
+          if (line.startsWith("```")) {
+            flush();
+            code = [];
+          } else if ((match = line.match(/^(#{1,3})\s+(.*)/))) {
+            flush();
+            out.push(`<h${match[1].length}>${inline(match[2])}</h${match[1].length}>`);
+          } else if ((match = line.match(/^\s*([-*]|\d+\.)\s+(.*)/))) {
+            flushParagraph();
+            const listTag = /\d/.test(match[1]) ? "ol" : "ul";
+            if (list && list.tag !== listTag) flushList();
+            list = list || { tag: listTag, items: [] };
+            list.items.push(match[2]);
+          } else if ((match = line.match(/^>\s?(.*)/))) {
+            flush();
+            out.push(`<blockquote>${inline(match[1])}</blockquote>`);
+          } else if (!line.trim()) {
+            flush();
+          } else {
+            flushList();
+            paragraph.push(line.trim());
+          }
+        }
+        flush();
+        return out.join("");
+      }
+
+      /* ------------------------------------------------------ code and diff views */
+      const lineNumber = "w-10 shrink-0 select-none px-2 text-right text-muted-foreground/60";
+
+      function renderCode(content) {
+        const rows = content
+          .split("\n")
+          .map((line, index) => `<div class="flex"><span class="${lineNumber}">${index + 1}</span><span class="pr-4 whitespace-pre">${escapeHtml(line)}</span></div>`)
+          .join("");
+        return `<div class="mx-auto w-full max-w-4xl overflow-hidden rounded-lg border bg-muted/30">
+                  <div class="overflow-x-auto py-3 font-mono text-[0.8125rem] leading-6"><div class="min-w-fit">${rows}</div></div>
+                </div>`;
+      }
+
+      const DIFF_STYLES = {
+        add: { sign: "+", row: "bg-emerald-500/10 text-emerald-800 dark:text-emerald-300" },
+        del: { sign: "-", row: "bg-red-500/10 text-red-800 dark:text-red-300" },
+        ctx: { sign: "", row: "" },
+      };
+      const countLines = (lines, type) => lines.filter(([kind]) => kind === type).length;
+      const fileStats = (file) => {
+        const lines = file.hunks.flatMap((hunk) => hunk.lines);
+        return { added: countLines(lines, "add"), removed: countLines(lines, "del") };
+      };
+      const statsHtml = ({ added, removed }) =>
+        `<span class="font-mono text-xs"><span class="text-emerald-600 dark:text-emerald-400">+${added}</span> <span class="text-destructive">-${removed}</span></span>`;
+
+      function diffSummary() {
+        const totals = DIFF_FILES.reduce(
+          (sum, file) => {
+            const { added, removed } = fileStats(file);
+            return { added: sum.added + added, removed: sum.removed + removed };
+          },
+          { added: 0, removed: 0 },
+        );
+        return `<span class="truncate font-medium text-foreground">Changes on ${escapeHtml(PROJECT.branch)}</span>
+                <span class="shrink-0">· ${plural(DIFF_FILES.length, "file")}</span>
+                <span class="ml-1 shrink-0">${statsHtml(totals)}</span>`;
+      }
+
+      function renderHunk(hunk) {
+        let oldNo = hunk.oldStart;
+        let newNo = hunk.newStart;
+        const oldCount = hunk.lines.length - countLines(hunk.lines, "add");
+        const newCount = hunk.lines.length - countLines(hunk.lines, "del");
+        const rows = hunk.lines
+          .map(([type, text]) => {
+            const style = DIFF_STYLES[type];
+            const old = type === "add" ? "" : oldNo++;
+            const next = type === "del" ? "" : newNo++;
+            return `<div class="flex ${style.row}">
+                      <span class="${lineNumber}">${old}</span><span class="${lineNumber}">${next}</span>
+                      <span class="w-5 shrink-0 text-center select-none">${style.sign}</span>
+                      <span class="pr-4 whitespace-pre">${escapeHtml(text)}</span>
+                    </div>`;
+          })
+          .join("");
+        return `<div class="bg-muted/50 px-4 py-1 text-xs text-muted-foreground">@@ -${hunk.oldStart},${oldCount} +${hunk.newStart},${newCount} @@</div>${rows}`;
+      }
+
+      function renderDiff() {
+        return `<div class="mx-auto w-full max-w-4xl space-y-4">
+          ${DIFF_FILES.map(
+            (file) => `
+              <section class="overflow-hidden rounded-lg border">
+                <div class="flex items-center gap-2 border-b bg-muted/50 px-4 py-2">
+                  <i data-lucide="file-code" class="size-4 shrink-0 text-muted-foreground"></i>
+                  <span class="truncate font-mono text-xs font-medium">${escapeHtml(file.path)}</span>
+                  <span class="ml-auto shrink-0">${statsHtml(fileStats(file))}</span>
+                </div>
+                <div class="overflow-x-auto font-mono text-[0.8125rem] leading-6"><div class="min-w-fit">${file.hunks.map(renderHunk).join("")}</div></div>
+              </section>`,
+          ).join("")}
+        </div>`;
+      }
+
+      /* ------------------------------------------- testing + commands panels */
+      function panelRow(row) {
+        return `
+          <li class="flex items-center gap-3 px-4 py-3">
+            <div class="flex size-9 shrink-0 items-center justify-center rounded-md border bg-muted"><i data-lucide="${row.icon}" class="size-4 text-muted-foreground"></i></div>
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm font-medium">${row.title}</p>
+              <p class="mt-0.5 truncate text-xs text-muted-foreground">${row.meta}</p>
+            </div>
+            <div class="shrink-0">${row.trailing}</div>
+          </li>`;
+      }
+
+      function statCard(stat) {
+        return `
+          <div class="card p-4">
+            <p class="text-sm text-muted-foreground">${stat.label}</p>
+            <p class="mt-1 text-2xl font-semibold tracking-tight">${stat.value}</p>
+            <p class="mt-1 text-xs text-muted-foreground">${stat.hint}</p>
+          </div>`;
+      }
+
+      function renderPanel(name, panel) {
+        $(`[data-tab-panel="${name}"]`).innerHTML = `
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <h3 class="text-base font-semibold tracking-tight">${panel.title}</h3>
+              <p class="mt-0.5 text-sm text-muted-foreground">${panel.description}</p>
+            </div>
+            <div class="flex shrink-0 items-center gap-2">${panel.action}</div>
+          </div>
+          ${panel.stats ? `<div class="mt-5 grid gap-3 sm:grid-cols-3">${panel.stats.map(statCard).join("")}</div>` : ""}
+          <ul class="card mt-5 divide-y overflow-hidden">${panel.rows.map(panelRow).join("")}</ul>`;
+        refreshIcons();
+      }
+
+      // Commands has a list view and a run-history view.
+      let commandsView = "list";
+      const COMMANDS_VIEWS = {
+        list: () => ({
+          title: "Commands",
+          description: "Saved commands you can run in this project.",
+          action: `<button class="btn btn-outline btn-sm" data-commands-action="history"><i data-lucide="history"></i>View history</button>
+                   <button class="btn btn-outline btn-sm"><i data-lucide="plus"></i>Add command</button>`,
+          rows: [
+            { icon: "terminal", title: "Start dev server", meta: mono("npm run dev"), trailing: trailingButton("play", "Run") },
+            { icon: "terminal", title: "Build", meta: mono("npm run build"), trailing: trailingButton("play", "Run") },
+            { icon: "terminal", title: "Run tests", meta: mono("npm test"), trailing: trailingButton("play", "Run") },
+          ],
+        }),
+        history: () => ({
+          title: "Run history",
+          description: "Past runs of this project's commands.",
+          action: `<button class="btn btn-outline btn-sm" data-commands-action="back"><i data-lucide="arrow-left"></i>Commands</button>`,
+          rows: COMMAND_HISTORY.map((run) => ({
+            icon: run.ok ? "circle-check" : "circle-x",
+            title: run.title,
+            meta: `${mono(run.command)} · started ${run.started} · ${run.duration}`,
+            trailing: run.ok ? '<span class="badge badge-success">Success</span>' : `<span class="badge badge-destructive">Failed (exit ${run.exit})</span>`,
+          })),
+        }),
+      };
+
+      const renderCommands = () => renderPanel("commands", COMMANDS_VIEWS[commandsView]());
+
+      $('[data-tab-panel="commands"]').addEventListener("click", (event) => {
+        const action = event.target.closest("[data-commands-action]");
+        if (!action) return;
+        commandsView = action.dataset.commandsAction === "history" ? "history" : "list";
+        renderCommands();
+      });
+
+      /* ----------------------------------------------------------------- menus */
+      let openMenuState = null;
+
+      // Menus that need refreshing or focus each time they open.
+      const MENU_ON_OPEN = {
+        "menu-branch": () => {
+          branchSearch.value = "";
+          renderBranchItems();
+        },
+      };
+
+      function closeMenu() {
+        if (!openMenuState) return;
+        openMenuState.menu.hidden = true;
+        openMenuState.trigger.setAttribute("aria-expanded", "false");
+        openMenuState = null;
+      }
+
+      function openMenu(trigger) {
+        const menu = byId(trigger.dataset.menuTarget);
+        const taskRowEl = trigger.closest("[data-task-id]");
+        if (taskRowEl) menu.dataset.taskId = taskRowEl.dataset.taskId;
+        if (MENU_ON_OPEN[menu.id]) MENU_ON_OPEN[menu.id]();
+
+        menu.hidden = false;
+        const anchor = trigger.getBoundingClientRect();
+        const box = menu.getBoundingClientRect();
+        const below = anchor.bottom + 4;
+        const top = below + box.height > innerHeight - 8 ? anchor.top - box.height - 4 : below;
+        const left = trigger.dataset.align === "end" ? anchor.right - box.width : anchor.left;
+        menu.style.top = `${Math.max(8, top)}px`;
+        menu.style.left = `${Math.min(Math.max(8, left), innerWidth - box.width - 8)}px`;
+
+        trigger.setAttribute("aria-expanded", "true");
+        openMenuState = { menu, trigger };
+        const focusTarget = $("[data-menu-focus]", menu);
+        if (focusTarget) focusTarget.focus();
+      }
+
+      document.addEventListener("click", (event) => {
+        if (event.target.closest("[data-menu-keep]")) return;
+
+        const trigger = event.target.closest("[data-menu-target]");
+        if (trigger) {
+          const wasOpen = openMenuState && openMenuState.trigger === trigger;
+          closeMenu();
+          if (!wasOpen) openMenu(trigger);
+          return;
+        }
+
+        const menu = event.target.closest(".menu");
+        if (menu) handleMenuSelection(event.target, menu);
+        closeMenu();
+      });
+
+      function handleMenuSelection(target, menu) {
+        const branch = target.closest("[data-branch]");
+        if (branch) switchBranch(branch.dataset.branch);
+        const created = target.closest("[data-branch-create]");
+        if (created) switchBranch(created.dataset.branchCreate);
+
+        const model = target.closest("[data-model]");
+        if (model) {
+          selectedModel = model.dataset.model;
+          renderModels();
+        }
+
+        const taskAction = target.closest("[data-task-action]");
+        if (taskAction) {
+          const bulk = menu.id === "menu-bulk";
+          const ids = bulk ? [...selected] : [Number(menu.dataset.taskId)];
+          runTaskAction(taskAction.dataset.taskAction, ids, { clearSelection: bulk });
+        }
+
+        const tabTarget = target.closest("[data-tab-target]");
+        if (tabTarget) selectTab(tabTarget.dataset.tabTarget);
+        refreshIcons();
+      }
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        if (!byId("modal-overlay").hidden) closeModal();
+        else if (openMenuState) closeMenu();
+        else setPopupOpen(false);
+      });
+      addEventListener("resize", closeMenu);
+      byId("task-list").addEventListener("scroll", closeMenu);
+
+      /* ------------------------------------------------------------------ boot */
+      renderHeader();
+      renderBranchItems();
+      renderModels();
+      Object.keys(browsers).forEach(renderBrowser);
+      Object.entries(PANELS).forEach(([name, panel]) => renderPanel(name, panel));
+      renderCommands();
+      renderTasks();
+      selectTab("tasks");
+      refreshIcons();
+    </script>
+  </body>
+</html>

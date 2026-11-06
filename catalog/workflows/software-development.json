@@ -1,0 +1,74 @@
+{
+  "id": "software-development",
+  "name": "Software Development",
+  "description": "The default workflow for a typical development task: plan the UI, plan tests, build it, review it (looping back to Development up to 3 times), get a human sign-off, then document and retro before the built-in Complete stage commits, pushes and raises the PR.",
+  "enabled": true,
+  "steps": [
+    {
+      "agentId": "software-engineer",
+      "instructions": "Classify the design tier with the `ui-design` skill first, and read only the reference files it names. Plan the UI for this task. Produce one self-contained HTML mockup per screen or view the task introduces or changes, as this step's outputs (one output artifact per screen, format \"html\") — no other project files. If the task has no UI surface at all, call skip_step with a short reason instead of producing mockups.\n\nWhen a mockup's JS toggles an element's visibility, never rely on the `hidden` attribute if that same element's selector also sets its own `display` property (e.g. `display: flex`/`grid`) in your stylesheet — an author CSS rule on `display` always overrides the browser's built-in `[hidden] { display: none }` default, regardless of rule order or specificity, so the \"hidden\" element keeps rendering and can visibly break a grid/flex layout (an extra item wrapping onto its own row). Toggle visibility via inline `style.display` from JS instead (or a dedicated `.is-hidden { display: none !important }` class), and verify the toggle actually works by opening the file and clicking through every interactive state before submitting it, not just by reading the markup.\n\nOn a revision round, list in your summary every change from the previous round's mockups, including interaction changes the reviewer did not ask for (the shape of a field, where a link leads). If a mockup now contradicts a design decision stated in an earlier round's summary, say which one stands.\n\nBefore designing a revision round, read every earlier round's reviewer decision and any file it points to (a reference image, a session log). If your prompt does not include them, look in the earlier rounds' outputs; if you still can't find them, ask the person in this session before designing.",
+      "id": "ui-planning",
+      "skillIds": [
+        "ui-design"
+      ],
+      "preloadSkillIds": [
+        "ui-design"
+      ],
+      "name": "UI Planning",
+      "canEditCode": false,
+      "canRunCommands": false,
+      "requiresApproval": true,
+      "quickLook": "none"
+    },
+    {
+      "agentId": "software-engineer",
+      "instructions": "List the unit, integration and component test cases this task needs, covering happy paths, edge cases and failure/error scenarios. Do not write any test code or project files. Call complete_step with the cases as your summary/output, grouped under a heading per kind (unit, integration, component) as a table or list, each with a short name Development can check off one by one; the Development step will implement these cases.\n\nBefore listing cases, check the baseline for every acceptance criterion that requires a project check to pass (lint, build, tests, coverage). Use the project's documented commands and read-only tooling if you can run them. If you can't, say so. If a required check already fails on the starting revision, report it in `planningGap` straight away. Say which check it is, how many failures there are and in which files, and whether the criterion should read \"no new failures\" or the existing failures should become their own task. Development should not discover this later. Also check that every acceptance criterion can be evaluated in this environment at all: if one depends on git (status, diff, commit, a branch to review), Docker or another tool that is unavailable, or the project folder is not inside a committed repository, ask the person in this session to reword the criterion or decide where the code is versioned before you complete; do not only list it in planningGap. Also list in `planningGap` any contract or interaction choice the spec leaves open that your test cases have to assume, such as omitted vs null fields, error-body formats or case sensitivity.\n\nBefore deferring any requirement to a manual/browser-only check because the repo lacks a DOM or animation harness, check whether the behavior is actually driven by pure functions (position, geometry, timing or state-transition math). If it is, name a pure-function unit test case for it directly — for example, computing the derived value before and after the state change (a reassignment, a count change, a tick) and asserting the two outputs are consistent with the requirement — instead of bucketing the whole requirement as manual-only. Reserve manual-only for what genuinely needs rendered pixels or real browser/timing behavior to verify.\n\nBefore completing: (1) Count the case ids in your tables and state those totals; never estimate them. (2) For every input field, name cases for values of the right type that are out of range: a number wider than its storage, the earliest and latest date, text over the length limit, and alternative spellings the parser accepts. (3) Say which behaviours the project's test environment cannot prove (real simultaneity, row locks, a service that is stubbed) and name the manual check for each. (4) If the choices you had to assume shape a contract another repository consumes, or a database schema, ask the person directly in this session before completing. Ask about all such choices in one batch, not only the ones you judge most important; listing them in planningGap alone lets Development build on unconfirmed assumptions. When you ask the person to accept defaults, put each default's text in the question itself. An answer like 'accept the rest' covers only the defaults you showed. (5) For every case that expects a refusal, name the stated limit or rule that refuses the input. If the spec fixes no such limit, or leaves the input's form open (a date or a duration, which unit), settle that first or drop the case. (6) When a case says a response or log \"is searched for\" a private value, say the search is for the value itself, including inside any URL or key the response carries, not for a field name. List every response field derived from a storage key or internal id. (7) For each race case, when the test environment cannot run two writers at once, name the point in the code where the test forces the competing write.\n\nOpen the final approved UI Planning mockups themselves, not only their summaries. Where a case departs from what a mockup shows, do not choose silently: ask the person in this session which one stands, and record the answer in your summary.\n\nFor every non-functional requirement in the spec (\"performance must not regress\", \"no flicker\", \"stays responsive\"), name at least one automated case for a measurable proxy, such as which store updates must not cause a re-derive or re-render (for example a streamed log chunk), or list it as a manual check and say why no proxy exists.",
+      "id": "test-case-planning",
+      "name": "Test Case Planning",
+      "canEditCode": false,
+      "canRunCommands": true,
+      "requiresApproval": false,
+      "quickLook": "none"
+    },
+    {
+      "agentId": "software-engineer",
+      "instructions": "Implement the task, including the tests planned in Test Case Planning. On a later round (after Code Review found issues), fix every issue from the latest review before calling complete_step again.\n\nBefore calling complete_step, check your actual test changes against the Test Case Planning step's own list of named cases, one by one — not just an overall suite pass count. A green full-suite count does not prove every named case landed; a case can be silently dropped from the diff while the suite still passes. If a named case genuinely doesn't apply (for example, the code it describes doesn't exist on this branch), say so explicitly in your summary rather than leaving it unmentioned.\n\nWhen you rewrite an existing spec or doc section, change only what the task supersedes. Keep requirements outside the task's scope. If they aren't built, list them under 'Not yet implemented'. Only an explicit user decision removes a documented requirement. Say in your summary which existing spec lines you replaced.",
+      "id": "development",
+      "name": "Development",
+      "canEditCode": true,
+      "canRunCommands": false,
+      "requiresApproval": false,
+      "quickLook": "code"
+    },
+    {
+      "agentId": "software-engineer",
+      "instructions": "Review the current branch's diff against its base (use diff_summary/diff_file — never assume the whole diff fits in context). If diff_summary reports no base because the run works directly on the checked-out branch, find this task's commits with `git log` (the Development step's commit and anything after the task's start revision). Review them with `git show <sha>` or `git diff <start>..HEAD`, and name the range you reviewed in your summary. Don't fall back to reading whole files as they are on disk. Call complete_step with verdict \"pass\" if the change is correct, tested and clean, or verdict \"issues\" if not, listing every problem as a concrete, actionable item with its severity, its location (`file:line` or the area) and the fix expected, in a table or list.\n\nThis step may have no shell. If so, do not plan around `git` commands or re-running tests: review the whole branch diff with diff_summary/diff_file, and on a later round check each issue from your previous review against the current file contents. Say in your summary that you did not run the tests and whose counts you are quoting.",
+      "id": "code-review",
+      "name": "Code Review",
+      "canEditCode": false,
+      "canRunCommands": false,
+      "requiresApproval": false,
+      "quickLook": "diff",
+      "loopBack": {
+        "toStepId": "development",
+        "maxRounds": 3
+      }
+    },
+    {
+      "agentId": "documentation-n-retro-agent",
+      "instructions": "Run a documentation-and-retro pass over this task's changes using the maintain-project-context skill. Store retro learnings in files (within the project or in the agent/skill file that executed this task), never in memory. Then handle every entry under \"Planning gaps raised this run\" in your prompt, if there is one: for each gap, reason about its root cause (why planning missed it, and what rule would have caught it). When the fix belongs to this project's own planning (a house rule the next planning session on this project should already know), write it into .docs/planning-notes.md right away (create it if missing; keep it a short, current list of rules grouped by topic, not a log of tasks), with no approval needed, the same as .docs/blueprint.md. Future planning sessions on this project read that file before they start. When the fix instead belongs in a shared Catalog Workflow step's instructions or in a Skill (used by every project, not just this one), do not apply it on your own: describe the exact proposed change and why it would have prevented the gap, ask the person directly in this session whether to apply it, and wait for their answer. Only after an explicit \"yes\" call update_workflow_step (workflow id, step id, the step's complete new instructions) or update_skill (skill id, the complete new SKILL.md body). On a \"no\", silence or an unclear reply, leave the shared definition unchanged and note the declined proposal in your summary. Your summary must list the docs you updated, the retro updates you made, and what you did about each planning gap (a table of gap | root cause | action works well).",
+      "skillIds": [
+        "maintain-project-context"
+      ],
+      "preloadSkillIds": [
+        "maintain-project-context"
+      ],
+      "id": "docs-and-retro",
+      "name": "Docs & Retro",
+      "canEditCode": true,
+      "canRunCommands": false,
+      "requiresApproval": false,
+      "quickLook": "documents"
+    }
+  ]
+}

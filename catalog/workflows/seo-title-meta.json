@@ -1,0 +1,17 @@
+{
+  "id": "seo-title-meta",
+  "name": "SEO Title and Meta Proposals",
+  "description": "Built-in default for the SEO title and meta slot: one step that proposes new titles and meta descriptions, then waits for approval.",
+  "enabled": true,
+  "steps": [
+    {
+      "agentId": "manager",
+      "instructions": "Write a better title (30 to 60 characters) and meta description (70 to 160 characters) for each page listed in this run, using its current text and search data. Propose only; change nothing. Do not commit, push or open a pull request: this Building has no repository, and the website must never be edited. Do not browse the web unless the task says so. Finish by completing the step with one output named \"proposals\", format markdown, whose content is only a JSON object like {\"pages\":[{\"url\":\"exact page address\",\"title\":\"text\",\"meta\":\"text\",\"notes\":\"why\"}]}. Include only pages from the list.",
+      "id": "propose-title-meta",
+      "name": "Propose titles and meta descriptions",
+      "canEditCode": false,
+      "requiresApproval": true,
+      "quickLook": "none"
+    }
+  ]
+}

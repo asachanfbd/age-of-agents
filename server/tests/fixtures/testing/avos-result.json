@@ -1,0 +1,19 @@
+{
+  "format": "agent-visual-os.test-result",
+  "schemaVersion": 1,
+  "outcome": "failed",
+  "durationMs": 61234,
+  "counts": { "total": 3, "passed": 2, "failed": 1, "skipped": 0 },
+  "metrics": [
+    { "key": "p95-latency", "label": "p95 latency", "value": 412.5, "unit": "ms", "threshold": { "operator": "lte", "value": 300 }, "status": "fail" },
+    { "key": "throughput", "value": 180, "unit": "req/s", "threshold": { "operator": "gte", "value": 150 }, "status": "pass" }
+  ],
+  "findings": [
+    { "id": "slow-checkout", "ruleId": "latency-budget", "severity": "medium", "title": "Checkout exceeds latency budget", "location": { "path": "load/smoke.js", "line": 42 } }
+  ],
+  "cases": [
+    { "id": "home", "name": "GET /", "group": "smoke", "outcome": "passed", "durationMs": 20000 },
+    { "name": "GET /products", "group": "smoke", "outcome": "passed" },
+    { "name": "POST /checkout", "group": "smoke", "outcome": "failed", "message": "p95 412.5ms > 300ms" }
+  ]
+}

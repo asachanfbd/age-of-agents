@@ -1,0 +1,17 @@
+{
+  "id": "seo-keyword-research",
+  "name": "SEO Keyword Research",
+  "description": "Built-in default for the SEO keyword research slot: one step that proposes new keywords.",
+  "enabled": true,
+  "steps": [
+    {
+      "agentId": "manager",
+      "instructions": "Propose new search keywords for the website described in this run. The run description holds the data to work from. Do not commit, push or open a pull request: this Building has no repository, and the website must never be edited. Do not browse the web unless the task says so. Finish by completing the step with one output named \"keywords\", format markdown, whose content is only a JSON object like {\"keywords\":[{\"keyword\":\"text\",\"reason\":\"one sentence\"}]}.",
+      "id": "research-keywords",
+      "name": "Research keywords",
+      "canEditCode": false,
+      "requiresApproval": false,
+      "quickLook": "none"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "notes-review",
+  "name": "Notes Review",
+  "description": "Built-in default for the Notes skeleton type: one step that reads the Building's notes and writes a short summary. Runs in the Building's own folder (no repository).",
+  "enabled": true,
+  "steps": [
+    {
+      "agentId": "manager",
+      "instructions": "Read the notes in this Building's working folder and write a short summary of what they say. Do not commit, push or open a pull request: this Building has no repository.",
+      "id": "review-notes",
+      "name": "Review notes",
+      "canEditCode": false,
+      "requiresApproval": false,
+      "quickLook": "none"
+    }
+  ]
+}

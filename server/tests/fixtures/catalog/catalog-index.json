@@ -1,0 +1,19 @@
+{
+  "agents": {
+    "builder": {
+      "name": "Builder",
+      "avatar": "🤖",
+      "manager": false,
+      "defaultAutonomy": "auto",
+      "enabled": true
+    },
+    "manager": {
+      "name": "Manager",
+      "avatar": "🧑‍💼",
+      "manager": true,
+      "defaultAutonomy": "auto",
+      "enabled": true
+    }
+  },
+  "skills": {}
+}

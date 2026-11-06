@@ -1,0 +1,5 @@
+# Project context
+
+Read [planning notes](planning-notes.md) before a planning session. Use [testing](testing.md) for local checks and [blueprint](blueprint.md) for current implementation notes. The [unified Planning board](../docs/unified-planning-board.md), [agent analytics](../docs/agent-analytics.md) and the [scheduler contract](../docs/scheduler.md), [CRM Building](../docs/crm-building.md), [Content Studio Building](../docs/content-studio-building.md), [design language](../docs/design-language.md) (tokens, colour rule, shared components) and [Auto-merge](../docs/auto-merge.md) and [dependent tasks](../docs/dependent-tasks.md) describe product behavior; [architecture](../docs/architecture.md) explains design decisions and [glossary](../docs/glossary.md) defines domain terms. Inspect the linked source before treating any description as implemented behavior.
+
+Keep current project knowledge in the owning topic. Task plans, test results, and retrospective receipts belong in Context Village, not here. Correct stale facts in place; do not add a historical lessons log.
