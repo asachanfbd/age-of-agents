@@ -199,6 +199,7 @@ function toPlanItemData(item: PlanItem): PlanItemData {
     ...(item.pullRequest ? { pullRequest: item.pullRequest } : {}),
     ...(item.dependsOn ? { dependsOn: item.dependsOn } : {}),
     ...(item.waiting ? { waiting: item.waiting } : {}),
+    ...(item.uiPlanningWaitsForParent !== undefined ? { uiPlanningWaitsForParent: item.uiPlanningWaitsForParent } : {}),
     archived: item.archived,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -849,6 +850,8 @@ export interface WorldState extends SchedulesState, ConnectionsState, AgentSessi
   retryAutoMerge: (projectId: string, itemId: string) => Promise<boolean>;
   /** Replaces a ready task's parents; false (with the daemon's reason reported) when refused. */
   setDependencies: (projectId: string, itemId: string, dependsOn: string[]) => Promise<boolean>;
+  /** Saves "UI planning waits for parent"; false when refused (the switch shows the failure inline, so no error is reported). */
+  setUiPlanningWaits: (projectId: string, itemId: string, value: boolean) => Promise<boolean>;
   /** Takes a waiting task back to plain ready. */
   cancelWaiting: (projectId: string, itemId: string) => Promise<boolean>;
   /** The "Chain tasks" shortcut for a planning session. */
@@ -1186,6 +1189,7 @@ const ACTION_SCOPE: Record<string, ErrorScope> = {
   setAutoMerge: 'taskActions',
   retryAutoMerge: 'taskActions',
   setDependencies: 'taskActions',
+  setUiPlanningWaits: 'taskActions',
   cancelWaiting: 'taskActions',
   removeFromWaitingList: 'taskActions',
   chainPlanningGroup: 'taskActions',
@@ -2179,6 +2183,15 @@ export const useWorldStore = create<WorldState>((set, get) => clearingScopeOnCal
       return true;
     } catch (error) {
       reportError(set, get, error, { action: 'setDependencies', projectId });
+      return false;
+    }
+  },
+
+  setUiPlanningWaits: async (projectId, itemId, value) => {
+    try {
+      reconcileSavedItem(set, projectId, await serverApi.setUiPlanningWaits(projectId, itemId, value));
+      return true;
+    } catch {
       return false;
     }
   },

@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { CATALOG_WORKFLOWS_DIR } from '../config.ts';
-import { QUICK_LOOK_KINDS } from '../domain/types.ts';
-import type { ProjectRecord, QuickLookKind, WorkflowAgentConfig, WorkflowRecord, WorkflowStep } from '../domain/types.ts';
+import { QUICK_LOOK_KINDS, REQUIRED_OUTPUT_FORMATS } from '../domain/types.ts';
+import type { ProjectRecord, QuickLookKind, RequiredOutputFormat, WorkflowAgentConfig, WorkflowRecord, WorkflowStep } from '../domain/types.ts';
 import { assertValidId, resolveWithinCatalogDir } from './paths.ts';
 import { listAgents, listSkills } from './catalogService.ts';
 import { listExecutors } from '../executors/executorService.ts';
@@ -200,6 +200,15 @@ function validateQuickLook(step: WorkflowStep, label: string): void {
   }
 }
 
+/** A set `requiredOutputFormat` is one of REQUIRED_OUTPUT_FORMATS; absent or null means outputs stay optional. */
+function validateRequiredOutputFormat(step: WorkflowStep, label: string): void {
+  const value = step.requiredOutputFormat;
+  if (value === undefined || value === null) return;
+  if (!REQUIRED_OUTPUT_FORMATS.includes(value as RequiredOutputFormat)) {
+    throw new InvalidWorkflowError(`${label}: requiredOutputFormat must be one of ${REQUIRED_OUTPUT_FORMATS.join(', ')}`);
+  }
+}
+
 const BRANCH_TYPE_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
 /** A set `branchType` is a lowercase slug, safe as a git branch name's first segment; absent, null or blank means the default. */
@@ -210,7 +219,7 @@ function validateBranchType(branchType: unknown): void {
   }
 }
 
-/** A valid branch type, unique step ids, valid slugs, every referenced agent/skill/executor id resolves, every loopBack targets an earlier step with a sane round budget, every Request changes target is an earlier step, and every Quick look is a known kind. Throws InvalidWorkflowError (mapped to 400) on the first problem found. */
+/** A valid branch type, unique step ids, valid slugs, every referenced agent/skill/executor id resolves, every loopBack targets an earlier step with a sane round budget, every Request changes target is an earlier step, every Quick look is a known kind, and every required output format is known. Throws InvalidWorkflowError (mapped to 400) on the first problem found. */
 async function validateWorkflowInput(input: WorkflowInput): Promise<void> {
   assertValidId('workflow', input.id);
   requireNonEmpty(input.name, 'name');
@@ -230,6 +239,8 @@ async function validateWorkflowInput(input: WorkflowInput): Promise<void> {
     seenIds.add(step.id);
     if (typeof step.canEditCode !== 'boolean') throw new InvalidWorkflowError(`${label}: canEditCode must be a boolean`);
     if (step.canRunCommands !== undefined && typeof step.canRunCommands !== 'boolean') throw new InvalidWorkflowError(`${label}: canRunCommands must be a boolean`);
+    if (step.canUseBrowser !== undefined && typeof step.canUseBrowser !== 'boolean') throw new InvalidWorkflowError(`${label}: canUseBrowser must be a boolean`);
+    if (step.canUseBrowser === true && !step.canEditCode && step.canRunCommands !== true) throw new InvalidWorkflowError(`${label}: canUseBrowser requires canEditCode or canRunCommands, because starting the app needs a shell`);
     if (typeof step.requiresApproval !== 'boolean') throw new InvalidWorkflowError(`${label}: requiresApproval must be a boolean`);
     validateAgentConfig(step, label, catalog);
     if (step.loopBack) {
@@ -243,6 +254,7 @@ async function validateWorkflowInput(input: WorkflowInput): Promise<void> {
     }
     validateRequestChangesTarget(step, index, input.steps, label);
     validateQuickLook(step, label);
+    validateRequiredOutputFormat(step, label);
   });
 }
 

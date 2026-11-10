@@ -341,6 +341,26 @@ test('createWorkflow accepts a boolean or absent canRunCommands and rejects anyt
   }
 });
 
+test('createWorkflow validates canUseBrowser: boolean only, and only on a step with a shell', async () => {
+  const step = { id: 'a', name: 'A', agentId: 'builder', canEditCode: false, requiresApproval: false, instructions: 'x' };
+  const viaCommands = await workflowService.createWorkflow({ ...validInput('flow-br-cmd'), steps: [{ ...step, canRunCommands: true, canUseBrowser: true }] });
+  assert.equal(viaCommands.steps[0]?.canUseBrowser, true);
+  await workflowService.createWorkflow({ ...validInput('flow-br-edit'), steps: [{ ...step, canEditCode: true, canUseBrowser: true }] });
+  await workflowService.createWorkflow({ ...validInput('flow-br-both'), steps: [{ ...step, canEditCode: true, canRunCommands: true, canUseBrowser: true }] });
+  await workflowService.createWorkflow({ ...validInput('flow-br-false'), steps: [{ ...step, canUseBrowser: false }] });
+  const absent = await workflowService.createWorkflow({ ...validInput('flow-br-absent'), steps: [step] });
+  assert.equal('canUseBrowser' in absent.steps[0]!, false);
+  for (const [index, bad] of ['true', 1, 0, null, {}, []].entries()) {
+    await assert.rejects(
+      () => workflowService.createWorkflow({ ...validInput(`flow-br-bad-${index}`), steps: [{ ...step, canRunCommands: true, canUseBrowser: bad as unknown as boolean }] }),
+      /step "A": canUseBrowser must be a boolean/,
+    );
+  }
+  await assert.rejects(() => workflowService.createWorkflow({ ...validInput('flow-br-noshell'), steps: [{ ...step, canUseBrowser: true }] }), /step "A": canUseBrowser requires canEditCode or canRunCommands/);
+  await assert.rejects(() => workflowService.createWorkflow({ ...validInput('flow-br-noshell2'), steps: [{ ...step, canRunCommands: false, canUseBrowser: true }] }), /canUseBrowser requires canEditCode or canRunCommands/);
+  await assert.rejects(() => workflowService.createWorkflow({ ...validInput('flow-br-typewins'), steps: [{ ...step, canUseBrowser: 'yes' as unknown as boolean }] }), /canUseBrowser must be a boolean/);
+});
+
 test('createWorkflow accepts a preloadSkillIds subset (round-trips) and an absent one, and rejects a non-subset or malformed one', async () => {
   await catalogService.createSkill({ id: 'lint-rules', name: 'Lint', description: 'Lint.', body: 'x' }).catch(() => undefined);
   await catalogService.createSkill({ id: 'commit-style', name: 'Commit', description: 'Commit.', body: 'x' }).catch(() => undefined);
@@ -357,4 +377,30 @@ test('createWorkflow accepts a preloadSkillIds subset (round-trips) and an absen
     () => workflowService.createWorkflow({ ...validInput('flow-preload-nostr'), steps: [step({ preloadSkillIds: [1] })] }),
     /preloadSkillIds must be an array of strings/,
   );
+});
+
+test('B036 requiredOutputFormat "html" round-trips; absent and null are accepted', async () => {
+  const input = validInput('flow-required-output');
+  input.steps = [
+    { ...input.steps[0]!, id: 'step-html', name: 'Step html', requiredOutputFormat: 'html' },
+    { ...input.steps[0]!, id: 'step-null', name: 'Step null', requiredOutputFormat: null },
+    { ...input.steps[0]!, id: 'step-absent', name: 'Step absent' },
+  ];
+  await workflowService.createWorkflow(input);
+  const fetched = await workflowService.getWorkflow('flow-required-output');
+  assert.deepEqual(fetched?.steps.map((step) => step.requiredOutputFormat), ['html', null, undefined]);
+});
+
+test('B036 an unknown requiredOutputFormat is rejected with a message naming the step', async () => {
+  for (const format of ['pdf', 'HTML', 42]) {
+    const input = validInput(`flow-bad-required-output-${String(format).toLowerCase()}`);
+    input.steps = [{ ...input.steps[0]!, requiredOutputFormat: format as never }];
+    await assert.rejects(
+      () => workflowService.createWorkflow(input),
+      (error: Error) => error instanceof workflowService.InvalidWorkflowError
+        && /Development/.test(error.message)
+        && /requiredOutputFormat must be one of html/.test(error.message),
+      String(format),
+    );
+  }
 });

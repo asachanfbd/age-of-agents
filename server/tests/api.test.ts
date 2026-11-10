@@ -170,7 +170,7 @@ test('/api/agent-tasks validates its input, then 404s for an unknown planning se
     const res = await api('/api/agent-tasks?taskId=x', { method: 'POST', headers, body: JSON.stringify(body) });
     assert.equal(res.status, 400, JSON.stringify(body));
   }
-  for (const body of [{}, { title: ' ' }, { description: 3 }]) {
+  for (const body of [{}, { title: ' ' }, { description: 3 }, { uiPlanningWaitsForParent: 'yes' }, { uiPlanningWaitsForParent: null }]) {
     const res = await api('/api/agent-tasks/item?taskId=x', { method: 'PATCH', headers, body: JSON.stringify(body) });
     assert.equal(res.status, 400, JSON.stringify(body));
   }

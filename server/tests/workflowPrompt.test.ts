@@ -369,3 +369,33 @@ test('buildStepPrompt for a read-only step that can run commands keeps the read-
   assert.equal(buildStepPrompt({ ...BASE_INPUT, canEditCode: false, canRunCommands: false }), buildStepPrompt({ ...BASE_INPUT, canEditCode: false }));
   assert.equal(buildStepPrompt({ ...BASE_INPUT, canRunCommands: true }), buildStepPrompt(BASE_INPUT), 'a write step is unchanged by the option');
 });
+
+test('buildStepPrompt adds the Browser section only for a step with the browser', () => {
+  assert.doesNotMatch(buildStepPrompt(BASE_INPUT), /# Browser/);
+  const prompt = buildStepPrompt({ ...BASE_INPUT, canEditCode: false, canRunCommands: true, browser: 'available' });
+  assert.match(prompt, /# Browser/);
+  for (const part of [/\.docs\//, /saved Commands/, /in the background on a free port/, /responds/, /Stop it before you call `complete_step`/, /browser_take_screenshot/, /empty, error and loading states/, /narrow \(mobile\) width/, /what you checked in the browser and what you saw/, /missing or differs from the plan is an issue/, /cannot be started/, /Never claim them as passed/, /no UI, skip the browser checks and say so in one line/]) {
+    assert.match(prompt, part);
+  }
+});
+
+test('buildStepPrompt tells the agent when the browser is unavailable', () => {
+  const prompt = buildStepPrompt({ ...BASE_INPUT, canEditCode: false, canRunCommands: true, browser: 'unavailable' });
+  assert.match(prompt, /headless browser is NOT available/);
+  assert.match(prompt, /unverified/);
+  assert.doesNotMatch(prompt, /browser_navigate/);
+});
+
+test('B036 both read-only Permissions variants say complete_step outputs are not files; the editable one need not', () => {
+  const allowed = /are not files and are always allowed/;
+  assert.match(buildStepPrompt({ ...BASE_INPUT, canEditCode: false }), allowed);
+  assert.match(buildStepPrompt({ ...BASE_INPUT, canEditCode: false, canRunCommands: true }), allowed);
+  assert.doesNotMatch(buildStepPrompt(BASE_INPUT), allowed);
+});
+
+test('B036 the HTML-mockup finish line appears only when the step requires html outputs', () => {
+  const line = /must include at least one complete HTML mockup in `outputs` \(format "html"\); `complete_step` will refuse the call without one/;
+  assert.match(buildStepPrompt({ ...BASE_INPUT, canEditCode: false, requiredOutputFormat: 'html' }), line);
+  assert.doesNotMatch(buildStepPrompt({ ...BASE_INPUT, canEditCode: false }), line);
+  assert.doesNotMatch(buildStepPrompt({ ...BASE_INPUT, canEditCode: false, requiredOutputFormat: null }), line);
+});

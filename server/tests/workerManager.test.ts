@@ -14,6 +14,7 @@ let tempRoot: string;
 let projectService: typeof import('../src/projects/projectService.ts');
 let workerManagerModule: typeof import('../src/worker/workerManager.ts');
 let collections: typeof import('../src/db/collections.ts');
+let executorService: typeof import('../src/executors/executorService.ts');
 let planItemService: typeof import('../src/projects/planItemService.ts');
 let planModule: typeof import('../src/projects/plan.ts');
 let catalogService: typeof import('../src/catalog/catalogService.ts');
@@ -32,6 +33,7 @@ before(async () => {
   projectService = await import('../src/projects/projectService.ts');
   workerManagerModule = await import('../src/worker/workerManager.ts');
   collections = await import('../src/db/collections.ts');
+  executorService = await import('../src/executors/executorService.ts');
   planItemService = await import('../src/projects/planItemService.ts');
   planModule = await import('../src/projects/plan.ts');
   catalogService = await import('../src/catalog/catalogService.ts');
@@ -861,7 +863,7 @@ test('planning is CLI-only: an executor whose kind is no longer a supported inte
   assert.equal((await projectService.getProject(project.id)).status, 'idle');
 });
 
-test('with no executor chosen, a planning session runs on the first interactive CLI configured', async () => {
+test('with no executor chosen and no default stored, a planning session runs on the first interactive CLI configured', async () => {
   const project = await projectService.createProject({ name: 'Planned Default CLI', position: null });
   const terminal = fakeTerminalHost();
   const manager = workerManagerModule.createWorkerManager({ runClaudeTurn: fakeRunClaudeTurn([]).fn, terminalSessions: terminal.host });
@@ -871,6 +873,26 @@ test('with no executor chosen, a planning session runs on the first interactive 
   assert.equal(task.executorId, 'test-claude-cli', 'the default executor');
   assert.equal(task.executionMode, 'terminal');
   terminal.starts[0]?.onExit(0);
+  await waitUntil(async () => (await projectService.getProject(project.id)).status === 'idle');
+});
+
+test('bug 19.001.001: with no executor chosen, planning and ordinary sessions run on the owner\'s default coding agent', async () => {
+  const project = await projectService.createProject({ name: 'Sessions On Default', position: null });
+  const terminal = fakeTerminalHost();
+  const alt = (await executorService.listExecutors()).find((executor) => executor.id === 'test-claude-cli-alt')!;
+  const manager = workerManagerModule.createWorkerManager({ runClaudeTurn: fakeRunClaudeTurn([]).fn, terminalSessions: terminal.host, resolveDefaultExecutor: async () => alt });
+
+  const plan = await manager.startTask({ projectId: project.id, description: 'Draft the specs', kind: 'plan' });
+  assert.equal(plan.executorId, 'test-claude-cli-alt');
+  terminal.starts[0]?.onExit(0);
+  await waitUntil(async () => (await projectService.getProject(project.id)).status === 'idle');
+
+  const ordinary = await manager.startTask({ projectId: project.id, description: 'Do a thing' });
+  assert.equal(ordinary.executorId, 'test-claude-cli-alt');
+  const explicit = await manager.startTask({ projectId: (await projectService.createProject({ name: 'Sessions Explicit', position: null })).id, description: 'Pinned', kind: 'plan', executorId: 'test-claude-cli' });
+  assert.equal(explicit.executorId, 'test-claude-cli', 'an explicit choice still wins');
+  terminal.starts[1]?.onExit(0);
+  terminal.starts[2]?.onExit(0);
   await waitUntil(async () => (await projectService.getProject(project.id)).status === 'idle');
 });
 
@@ -1731,6 +1753,23 @@ test('createPlanningTask adds an open task to a running planning session\'s Proj
   terminal.starts[0]?.onExit(0);
   await waitUntil(async () => (await manager.getTask(task.id)).status === 'stopped');
   await assert.rejects(manager.createPlanningTask(task.id, { title: 'Late', description: '' }), workerManagerModule.TaskNotPlanningSessionError, 'a paused session can no longer create tasks');
+});
+
+test('38.002 I29 update_task can set only uiPlanningWaitsForParent on an unstarted task; a started task is refused', async () => {
+  const project = await projectService.createProject({ name: 'Planning Sets Waits', position: null });
+  const terminal = fakeTerminalHost();
+  const manager = workerManagerModule.createWorkerManager({ runClaudeTurn: fakeRunClaudeTurn([]).fn, terminalSessions: terminal.host });
+  const task = await manager.startTask({ projectId: project.id, description: 'Plan it', executorId: 'test-claude-cli', kind: 'plan' });
+  const item = await manager.createPlanningTask(task.id, { title: 'Child', description: 'Uses the parent' });
+  const updated = await manager.updatePlanningTask(task.id, item.id, { uiPlanningWaitsForParent: true });
+  assert.equal(updated.uiPlanningWaitsForParent, true);
+  assert.equal(updated.title, item.title, 'nothing else changes');
+  const { planItemsDb } = await import('../src/db/collections.ts');
+  await planItemsDb.update(item.id, { status: 'developing', workflowRunId: 'run' });
+  const { DependencyConflictError } = await import('../src/projects/dependencies.ts');
+  await assert.rejects(manager.updatePlanningTask(task.id, item.id, { uiPlanningWaitsForParent: false }), DependencyConflictError);
+  terminal.starts[0]?.onExit(0);
+  await waitUntil(async () => (await manager.getTask(task.id)).status === 'stopped');
 });
 
 test('planning completion is eligible only after task creation and defers while the planning turn is live', async () => {

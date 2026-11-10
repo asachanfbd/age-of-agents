@@ -19,9 +19,10 @@ import { assertWritable } from '../buildings/normalize.ts';
 import { primarySlotWorkflow, slotWorkflow, withStepAgents } from '../buildings/slotConfig.ts';
 import { CATALOG_DIR, PROJECTS_DIR } from '../config.ts';
 import { preloadSkillsProblem } from '../catalog/skillPreload.ts';
-import { ExecutorNotFoundError, getDefaultExecutor, getExecutor, listExecutors } from '../executors/executorService.ts';
+import { ExecutorNotFoundError, getExecutor, isInteractiveCli, listExecutors } from '../executors/executorService.ts';
+import { resolveFallbackExecutor } from '../executors/defaultExecutorInstance.ts';
 import { PLAN_DISALLOWED_TOOLS, PLAN_INSTRUCTIONS, buildPlanInstructions } from '../projects/plan.ts';
-import type { PlanningTaskDraft } from '../projects/plan.ts';
+import type { PlanningTaskDraft, PlanningTaskPatch } from '../projects/plan.ts';
 import {
   PlanItemCompletedError, PlanItemHasActiveTaskError, PlanItemNotCompletableError, PlanItemNotFoundError, archivePlanItem as archivePlanItemRecord,
   comparePlanningGroupOrder, completePlanItem as completePlanItemRecord, createPlanItem, createPlanningPlanItem, deletePlanItem as deletePlanItemRecord,
@@ -55,6 +56,7 @@ import { connections } from '../connections/index.ts';
 import { planTaskMcpServer } from '../terminal/planTaskTool.ts';
 import { stepTaskMcpServer } from '../terminal/stepTaskTool.ts';
 import { TESTING_TOOL_INSTRUCTIONS, testTaskMcpServer } from '../terminal/testTaskTool.ts';
+import { browserMcpServer, checkBrowserAvailability, type BrowserAvailability } from '../terminal/browserTool.ts';
 import type { McpServerLaunch } from '../terminal/mcpServers.ts';
 import {
   buildChangesRequestedMessage, buildRegressionMessage, buildRerunMessage, buildReviewFixMessage, buildStepPrompt,
@@ -65,6 +67,7 @@ import { stepOutputFiles as defaultStepOutputFiles, type StepOutputFiles } from 
 import { SKIPPED_AT_START_REASON, resolveSkippedStepIds } from './stepSelection.ts';
 import { summarizeWorkflowRun, stitchFallbackSummary, buildCompletionReport, buildPrBody } from './workflowSummarizer.ts';
 import { resolveBranchName } from '../projects/branchName.ts';
+import { DependencyConflictError, earlyStepOf, isReadyForDependencies } from '../projects/dependencies.ts';
 import {
   beginStartupStep, currentStartupStep, failStartupStep, finishStartupStep, isStartupIncomplete,
   normalizeStartup, planStartup, resetStartup, startupKindOf, type StartupKind,
@@ -79,6 +82,7 @@ import {
 } from '../testing/setup.ts';
 import { named, namedAtStart } from '../domain/displayName.ts';
 import { conflictPlanItemDescription, conflictResolutionWorkflow, conflictRunBranch, conflictRunTitle } from './conflictResolution.ts';
+import { assertRequiredOutputs } from './requiredOutputs.ts';
 import {
   MAX_CONCURRENT_TASKS_PER_PROJECT, SessionStillRunningError, TaskConflictError, TaskLimitReachedError, type SlotOccupant,
 } from './taskConflicts.ts';
@@ -335,6 +339,11 @@ export interface StartPlanItemOptions {
   workflow?: WorkflowRecord;
   /** Set only by `reopenBug`: this start is a completed bug's round 2 — a fresh branch, the new regression recorded on the bug as the start is accepted, and the earlier rounds' numbers carried forward. */
   regression?: { entry: BugRegression; roundOffsets: Record<string, number> };
+  /**
+   * A waiting task's early run: only the workflow's UI Planning step runs, and the run is held after it
+   * (see WorkflowRunRecord.early). Applies only while the task is still waiting for its parents; otherwise the start is normal.
+   */
+  early?: boolean;
 }
 
 type Listener = (event: WorkerEvent) => void;
@@ -359,6 +368,8 @@ export interface WorkerManagerDeps {
   runCodexTurn?: typeof runCodexTurn;
   /** Injectable PTY host for interactive CLI Tasks. */
   terminalSessions?: TerminalSessionHost;
+  /** Whether the headless browser can be offered to a `canUseBrowser` step. Injectable so a test doesn't depend on what is installed. */
+  checkBrowserAvailability?: typeof checkBrowserAvailability;
   /**
    * Used by the Complete stage's headless summarizer turn to pick which executor runs it (see `executors/leastUsedExecutor.ts`). Injectable so tests
    * never trigger the real `listExecutors`/`getExecutorLimits` — the latter shells out to the OS
@@ -387,6 +398,8 @@ export interface WorkerManagerDeps {
   onTestEvent?: (listener: (event: TestRunEvent) => void) => () => void;
   /** How long after an awaited Test Run ends the CLI may stay silent before the deferred turn-end wait is surfaced (`TEST_RUN_GRACE_MS`). */
   testRunGraceMs?: number;
+  /** The agent a run uses when nothing chose one (see `executors/fallbackExecutor.ts`) — injectable so a test can pin it. */
+  resolveDefaultExecutor?: () => Promise<ExecutorProfile>;
 }
 
 /** Runtime reason shown while a turn-end is held back because the agent is waiting on a Test Run it started. */
@@ -431,6 +444,10 @@ export function isTurnEndCoveredByTestRun(
 export function createWorkerManager(deps: WorkerManagerDeps = {}) {
   const listeners = new Set<Listener>();
   const terminalSessions = deps.terminalSessions ?? terminalSessionManager;
+  const probeBrowser = deps.checkBrowserAvailability ?? checkBrowserAvailability;
+  /** The one availability reading per step launch, taken when the prompt is built and used again when the session's servers are registered, so the two always agree. */
+  const browserAvailabilityByTask = new Map<string, BrowserAvailability>();
+  const resolveDefaultExecutor = deps.resolveDefaultExecutor ?? resolveFallbackExecutor;
   const pushTaskBranch = deps.commitAndPush ?? commitAndPush;
   /** Commits and pushes as the project's GitHub account (the machine default when it has none). */
   const commitWork = (project: ProjectRecord, cwd: string, branch: string, message: string) =>
@@ -637,16 +654,14 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
   }
 
   /**
-   * The executor a new session runs on. With none chosen, a planning session defaults to the first
-   * interactive CLI configured (planning always needs one). Planning gets its own, clearer error for
-   * a non-CLI executor; the generic one still covers an ordinary Task (every valid
-   * ExecutorProfile.kind is a CLI kind now, so this only ever fires for a stale/hand-edited
-   * executors.json entry — see docs/architecture.md).
+   * The executor a new session runs on. With none chosen, it is the owner's default coding agent
+   * (`resolveDefaultExecutor`, which always returns an interactive CLI, so planning gets one).
+   * Planning gets its own, clearer error for a non-CLI executor; the generic one still covers an
+   * ordinary Task (every valid ExecutorProfile.kind is a CLI kind now, so this only ever fires for
+   * a stale/hand-edited executors.json entry — see docs/architecture.md).
    */
   async function resolveStartExecutor(executorId: string | undefined, planning: boolean): Promise<ExecutorProfile> {
-    const executor = executorId
-      ? await getExecutor(executorId)
-      : (planning ? (await listExecutors()).find(isInteractiveCli) : undefined) ?? await getDefaultExecutor();
+    const executor = executorId ? await getExecutor(executorId) : await resolveDefaultExecutor();
     if (!executor) throw new ExecutorNotFoundError();
     if (planning && !isInteractiveCli(executor)) throw new PlanningRequiresCliError(executor);
     if (!isInteractiveCli(executor)) throw new ExecutorNotSupportedError(executor);
@@ -1073,6 +1088,7 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
         ...(options.workflow ? { workflow: options.workflow } : {}),
         ...(options.createBranch !== undefined ? { createBranch: options.createBranch } : {}),
         ...(options.skippedStepIds?.length ? { skippedStepIds: options.skippedStepIds } : {}),
+        ...(options.early ? { early: true } : {}),
         createdAt: new Date().toISOString(),
       };
       const ordered = placeInQueue(queue, entry, options.queueIndex);
@@ -1092,6 +1108,7 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
     const found = await planItemQueueDb.get(entryId);
     if (!found) throw new PlanItemQueueEntryNotFoundError(entryId);
     // Under the Project's queue lock: an advance in the middle of starting this entry would otherwise put it back after the removal.
+    if (found.resumeRunId) throw new DependencyConflictError('This task\'s UI plan is approved and it is waiting for a free slot to continue: it can\'t be taken out of the line.');
     await withQueueLock(found.projectId, async () => {
       if (!(await planItemQueueDb.get(entryId))) throw new PlanItemQueueEntryNotFoundError(entryId);
       await planItemQueueDb.delete(entryId);
@@ -1163,8 +1180,15 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
     await planItemQueueDb.delete(next.id);
     await emitQueueChanged(projectId);
     try {
+      if (next.resumeRunId) {
+        // Only checked here: the step itself starts outside the queue lock (its launch can settle back into the queue).
+        await claimConcurrencySlot(await getProject(projectId), 'execute', terminalSessions);
+        void resumeOutsideQueue(next.resumeRunId, projectId);
+        return;
+      }
       await executePlanItem(next.planItemId, {
         executorId: next.executorId, workflowId: next.workflowId, workflow: next.workflow, createBranch: next.createBranch, skippedStepIds: next.skippedStepIds,
+        ...(next.early ? { early: true } : {}),
       });
     } catch (error) {
       if (error instanceof TaskConflictError || error instanceof ProjectFolderBusyError) {
@@ -1676,6 +1700,7 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
           readOnly: stepPermissions ? stepPermissions.readOnly : task.kind === 'plan',
           testing,
           ...(stepPermissions?.canRunCommands ? { canRunCommands: true } : {}),
+          ...(stepPermissions?.canUseBrowser ? { browser: true } : {}),
         };
         const updated = await requireTaskUpdate(task.id, { sessionSetup: setup });
         emit({ type: 'task', task: updated });
@@ -1696,7 +1721,12 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
         disallowedTools: setup.disallowedTools,
         readOnly: setup.readOnly,
         canRunCommands: setup.canRunCommands,
-        mcpServers: await sessionMcpServers(task, setup.testing),
+        mcpServers: await sessionMcpServers(task, setup.testing, setup.browser, () => {
+          const reading = browserAvailabilityByTask.get(task.id) ?? probeBrowser();
+          browserAvailabilityByTask.delete(task.id);
+          return reading;
+        }),
+        killProcessGroupOnExit: setup.browser,
         readOnlyDirs: sessionReadOnlyDirs(task),
         prompt: prompt === null ? '' : composeInteractivePrompt(prompt, task.kind, task.branch, planInstructions),
         sessionId,
@@ -1987,11 +2017,14 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
     const skippedStepIds = item.testingSetup || item.prConflict ? [] : resolveSkippedStepIds(workflow, options.skippedStepIds);
     const firstStep = workflow.steps.find((step) => !skippedStepIds.includes(step.id));
     if (!firstStep) throw new Error(`${namedAtStart('workflow', workflow.name)} has no steps to run`);
+    // An early start whose task stopped waiting meanwhile (its parents merged, or Cancel waiting) is an ordinary start.
+    const early = options.early && item.waiting ? earlyStepOf(workflow) : null;
+    if (options.early && item.waiting && early !== firstStep.id) throw new Error('This workflow has no UI Planning step to run before the parent tasks are merged.');
     await dropStepNotesOutside(item, workflow.steps.map((step) => step.id));
 
     const executor = (options.executorId ? await getExecutor(options.executorId) : undefined)
       ?? (item.executorId ? await getExecutor(item.executorId) : undefined)
-      ?? (await getDefaultExecutor());
+      ?? (await resolveDefaultExecutor());
     if (!executor) throw new ExecutorNotFoundError();
     if (!isInteractiveCli(executor)) throw new ExecutorNotSupportedError(executor);
 
@@ -2024,6 +2057,7 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
       attentionReason: null,
       loopRoundAllowance: 0,
       ...(skippedStepIds.length ? { skippedStepIds } : {}),
+      ...(early ? { early: { stepId: early, revisions: 0 } } : {}),
       ...(options.regression ? { regression: { roundOffsets: options.regression.roundOffsets } } : {}),
       ...(item.testingSetup ? { testingSetup: { mode: item.testingSetup.mode, evidence: null } } : {}),
       ...(item.prConflict ? { prConflict: { ...item.prConflict, outcome: null, detail: null } } : {}),
@@ -2039,7 +2073,8 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
       runInserted = true;
       // Once the first step Task lands in taskIds, its executor assignment is locked.
       const updated = await syncLinkedPlanItem(item.id, {
-        workflowRunId: run.id, status: 'developing', executorId: executor.id, waiting: undefined,
+        // An early run keeps the task waiting for its parents.
+        workflowRunId: run.id, status: 'developing', executorId: executor.id, waiting: early ? item.waiting : undefined,
         // A reopened bug returns to the board with its new regression recorded in the same write.
         ...(options.regression ? { bug: appendRegression(item.bug, options.regression.entry), archived: false } : {}),
       }, false);
@@ -2512,7 +2547,7 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
     const priorTask = resumeFrom?.taskId ? await tasksDb.get(resumeFrom.taskId) : undefined;
     const configuredExecutor = (step.executorId ? await getExecutor(step.executorId) : undefined) ?? (await getExecutor(run.executorId));
     const savedExecutor = priorTask?.sessionExecutor ? { id: priorTask.executorId, label: priorTask.executorId, ...priorTask.sessionExecutor } : undefined;
-    const executor = (savedExecutor && (!configuredExecutor || configuredExecutor.id === savedExecutor.id) ? savedExecutor : configuredExecutor) ?? await getDefaultExecutor();
+    const executor = (savedExecutor && (!configuredExecutor || configuredExecutor.id === savedExecutor.id) ? savedExecutor : configuredExecutor) ?? await resolveDefaultExecutor();
     if (!executor) throw new ExecutorNotFoundError();
     if (!isInteractiveCli(executor)) throw new ExecutorNotSupportedError(executor);
     const executionMode = 'terminal' as const;
@@ -2526,6 +2561,7 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
     const continuedTask = resumeSessionId && prior?.taskId ? await tasksDb.get(prior.taskId) : undefined;
     if (!continuedTask) await assertSkillsUsable(step.skillIds);
 
+    const browserAvailability = step.canUseBrowser && !run.testingSetup ? probeBrowser() : undefined;
     const stepNote = item.stepNotes?.[step.id];
     const prompt = resumeSessionId && message ? appendStepNote(message, stepNote) : buildStepPrompt({
       stepNote,
@@ -2535,6 +2571,8 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
       instructions: message && !opts.resumeOnly ? `${step.instructions}\n\n${message}` : step.instructions,
       canEditCode: step.canEditCode,
       canRunCommands: step.canRunCommands,
+      browser: browserAvailability && (browserAvailability.available ? 'available' : 'unavailable'),
+      requiredOutputFormat: step.requiredOutputFormat,
       requiresVerdict: Boolean(step.loopBack),
       requiresApproval: step.requiresApproval,
       skippable: !run.testingSetup && !run.prConflict,
@@ -2545,6 +2583,7 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
     });
 
     const taskId = randomUUID();
+    if (browserAvailability) browserAvailabilityByTask.set(taskId, browserAvailability);
     const now = new Date().toISOString();
     const task: TaskRecord = {
       id: taskId,
@@ -2726,10 +2765,15 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
     await syncPlanItemForRun(updated);
   }
 
-  /** Starts the first step after `fromStep` that wasn't left out at start, or the Complete stage when none is left. */
-  async function advanceToNextStepOrComplete(run: WorkflowRunRecord, fromStep: WorkflowStep): Promise<void> {
-    const skipped = run.skippedStepIds ?? [];
-    const next = run.workflowSnapshot.steps.slice(stepIndex(run, fromStep.id) + 1).find((step) => !skipped.includes(step.id));
+  /**
+   * Starts the first step after `fromStep` that wasn't left out at start, or the Complete stage when none is left.
+   * An early run is held after its UI Planning step instead (`skipped` when that step was skipped): only the
+   * dependency service (`releaseHeldRun`) lets it go on, once the parents are merged.
+   */
+  async function advanceToNextStepOrComplete(run: WorkflowRunRecord, fromStep: WorkflowStep, skipped = false): Promise<void> {
+    if (run.early && fromStep.id === run.early.stepId) { await holdEarlyRun(run, skipped); return; }
+    const skippedIds = run.skippedStepIds ?? [];
+    const next = run.workflowSnapshot.steps.slice(stepIndex(run, fromStep.id) + 1).find((step) => !skippedIds.includes(step.id));
     if (!next) { await completeWorkflowRun(run); return; }
     const round = (await allStepRuns(run.id, next.id)).length + 1;
     await startStepTask(run, next, round);
@@ -2901,6 +2945,7 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
     if (step.loopBack && input.verdict !== 'pass' && input.verdict !== 'issues') {
       throw new Error(`Step "${step.name}" reviews earlier work — complete_step needs verdict "pass" or "issues".`);
     }
+    assertRequiredOutputs(step, input.outputs);
     if (run.testingSetup) await assertSetupStepCompletable(run, step, input);
     const updated = await stepRunsDb.update(stepRun.id, {
       status: 'done',
@@ -2932,7 +2977,7 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
     if (!updated) throw new TaskNotWorkflowStepError();
     emit({ type: 'stepRun', stepRun: updated });
     if (step.canEditCode) await commitStepWork(run, project, step, updated);
-    await advanceToNextStepOrComplete(run, step);
+    await advanceToNextStepOrComplete(run, step, true);
     endStepSession(taskId);
     return updated;
   }
@@ -3122,8 +3167,173 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
     await resolveAttentionNotification(run);
     const target = requestChangesTarget(run, step);
     const round = (await allStepRuns(run.id, target.id)).length + 1;
-    await startStepTask(run, target, round, { message: buildChangesRequestedMessage(comment) });
+    const message = buildChangesRequestedMessage(comment);
+    if (run.early) await startEarlyRevision(run, target, round, message);
+    else await startStepTask(run, target, round, { message });
     return requireWorkflowRun(runId);
+  }
+
+  // ---- Early runs: a waiting task's UI Planning before its parents are merged (see WorkflowRunRecord.early) ----
+
+  /**
+   * An early run's Request changes round needs a free slot like any start: it runs now when one is
+   * free, else the run is held with the revision pending and waits in the Project's slot line.
+   */
+  async function startEarlyRevision(run: WorkflowRunRecord, step: WorkflowStep, round: number, message: string): Promise<void> {
+    const early = { ...run.early!, revisions: run.early!.revisions + 1 };
+    try {
+      await withProjectLock(run.projectId, async () => {
+        await claimConcurrencySlot(await getProject(run.projectId), 'execute', terminalSessions);
+        const updated = await workflowRunsDb.update(run.id, { early, updatedAt: new Date().toISOString() });
+        await startStepTask(updated ?? run, step, round, { message });
+      });
+    } catch (error) {
+      if (!(error instanceof TaskLimitReachedError)) throw error;
+      const held = await workflowRunsDb.update(run.id, { status: 'held', early: { ...early, pendingRevision: { message } }, updatedAt: new Date().toISOString() });
+      if (held) { emit({ type: 'workflowRun', run: held }); await syncPlanItemForRun(held); }
+      await withQueueLock(run.projectId, () => queueResume(run, error));
+    }
+  }
+
+  /** Puts a held run in the Project's slot line — at the end like any start, or `first` when it lost the slot it was given; it continues through `resumeHeldRun`. Under `withQueueLock`. */
+  async function queueResume(run: Pick<WorkflowRunRecord, 'id' | 'projectId' | 'planItemId' | 'executorId'>, limit?: TaskLimitReachedError, first = false): Promise<void> {
+    const queue = await listPlanItemQueue(run.projectId);
+    if (queue.some((entry) => entry.resumeRunId === run.id)) return;
+    const entry: PlanItemQueueEntry = {
+      id: randomUUID(), projectId: run.projectId, planItemId: run.planItemId, executorId: run.executorId, resumeRunId: run.id, createdAt: new Date().toISOString(),
+    };
+    const ordered = placeInQueue(queue, entry, first ? 0 : undefined);
+    entry.position = ordered.indexOf(entry);
+    await planItemQueueDb.insert(entry);
+    await saveQueueOrder(ordered);
+    await emitQueueChanged(run.projectId);
+    if (limit) await raiseTaskLimitNotification(run.projectId, limit);
+  }
+
+  /**
+   * Continues a held run without holding the queue lock. A start that lands in the meantime and takes the slot puts it
+   * back at the front of the line; any other failure leaves the run needing attention.
+   */
+  async function resumeOutsideQueue(runId: string, projectId: string): Promise<void> {
+    try {
+      await resumeHeldRun(runId);
+    } catch (error) {
+      const run = await workflowRunsDb.get(runId);
+      if (!run) return;
+      if (error instanceof TaskLimitReachedError) await withQueueLock(projectId, () => queueResume(run, error, true));
+      else await setWorkflowRunNeedsAttention(run, `Could not continue after UI Planning: ${startupErrorReason(error)}`);
+      return;
+    }
+    await advanceQueueIfIdle(projectId);
+  }
+
+  /** Holds an early run after its UI Planning step: it keeps no slot and waits for the parents. */
+  async function holdEarlyRun(run: WorkflowRunRecord, skipped: boolean): Promise<void> {
+    const held = await workflowRunsDb.update(run.id, {
+      status: 'held', early: { ...run.early!, ...(skipped ? { skipped: true } : {}) }, currentStepProgress: null, updatedAt: new Date().toISOString(),
+    });
+    if (!held) return;
+    emit({ type: 'workflowRun', run: held });
+    await syncPlanItemForRun(held);
+  }
+
+  /**
+   * Continues a held run, claiming a slot (TaskLimitReachedError when none is free): its pending
+   * revision round, or — once released — the step after UI Planning, as an ordinary run from then on.
+   * A run that is no longer held is left alone. Never called under the queue lock (see `resumeOutsideQueue`).
+   */
+  function resumeHeldRun(runId: string): Promise<void> {
+    return withRunLock(runId, async () => {
+      const run = await workflowRunsDb.get(runId);
+      if (run?.status !== 'held' || !run.early) return;
+      const step = findStep(run, run.early.stepId)!;
+      await withProjectLock(run.projectId, async () => {
+        await claimConcurrencySlot(await getProject(run.projectId), 'execute', terminalSessions);
+        const pending = run.early!.pendingRevision;
+        if (pending) {
+          const { pendingRevision: _sent, ...early } = run.early!;
+          const updated = await workflowRunsDb.update(run.id, { early, updatedAt: new Date().toISOString() });
+          await startStepTask(updated ?? run, step, (await allStepRuns(run.id, step.id)).length + 1, { message: pending.message });
+          return;
+        }
+        if (!run.early!.released) return;
+        const continued = await workflowRunsDb.update(run.id, { early: undefined, status: 'running', updatedAt: new Date().toISOString() });
+        await advanceToNextStepOrComplete(continued ?? run, step);
+      });
+    });
+  }
+
+  /**
+   * The dependency service's release of a held early run once every parent is merged: the run's branch is
+   * reset to the checked-out base, so the later steps start from the parents' merged code; the task stops
+   * waiting; and the run goes on through the slot line (`resumeHeldRun`). False when it is not releasable.
+   */
+  async function releaseHeldRun(runId: string): Promise<boolean> {
+    const released = await withRunLock(runId, async () => {
+      const run = await workflowRunsDb.get(runId);
+      if (run?.status !== 'held' || !run.early || run.early.released || run.early.pendingRevision) return null;
+      const project = await getProject(run.projectId);
+      if (run.worktreePath && run.baseBranch) {
+        await ensureRunWorktree(project, run);
+        await git(run.worktreePath, ['reset', '--hard', run.baseBranch]);
+      }
+      const updated = await workflowRunsDb.update(run.id, { early: { ...run.early, released: true }, updatedAt: new Date().toISOString() });
+      if (updated) emit({ type: 'workflowRun', run: updated });
+      const item = await planItemsDb.update(run.planItemId, { waiting: undefined, updatedAt: new Date().toISOString() });
+      if (item) emit({ type: 'planItem', planItem: item });
+      return updated ?? run;
+    });
+    if (!released) return false;
+    // Tasks already in line go first, so a released run never jumps the queue.
+    const lineWaiting = await withQueueLock(released.projectId, async () => {
+      if ((await listPlanItemQueue(released.projectId)).length === 0) return false;
+      await queueResume(released);
+      await advanceQueueLocked(released.projectId);
+      return true;
+    });
+    if (!lineWaiting) await resumeOutsideQueue(released.id, released.projectId);
+    return true;
+  }
+
+  /**
+   * Throws away a waiting task's early run (Cancel waiting, archive, delete): its live session is stopped and
+   * the run, its step rounds and Tasks, worktree, local branch and saved outputs are deleted, so the task is ready again.
+   */
+  async function discardEarlyRun(runId: string): Promise<void> {
+    const projectId = await withRunLock(runId, async () => {
+      const run = await workflowRunsDb.get(runId);
+      if (!run?.early) return null;
+      if (run.status === 'starting') { startups.get(run.id)?.cancel(); await whenStartupSettled(run.id); }
+      for (const stepRun of await stepRunsDb.find((candidate) => candidate.runId === run.id)) await stopLiveStepRound(stepRun);
+      await resolveAttentionNotification(run);
+      const project = await getProject(run.projectId);
+      const projectDir = projectAbsolutePath(project);
+      if (run.worktreePath && existsSync(run.worktreePath)) await removeRunWorktree(projectDir, run.worktreePath).catch((error) => console.error(`Failed to remove worktree for run ${run.id}: ${(error as Error).message}`));
+      if (run.branch && await localBranchExists(projectDir, run.branch).catch(() => false)) {
+        await git(projectDir, ['branch', '-D', run.branch]).catch((error) => console.error(`Failed to remove branch for run ${run.id}: ${(error as Error).message}`));
+      }
+      await rollbackLaunchedTasks(run, project).catch((error) => console.error(`Failed to roll back tasks of run ${run.id}:`, error));
+      for (const stepRun of await stepRunsDb.find((candidate) => candidate.runId === run.id)) await stepRunsDb.delete(stepRun.id);
+      for (const entry of await planItemQueueDb.find((candidate) => candidate.resumeRunId === run.id)) await planItemQueueDb.delete(entry.id);
+      await removeRunOutputs(run);
+      await workflowRunsDb.delete(run.id);
+      emit({ type: 'workflowRunDeleted', runId: run.id, projectId: run.projectId });
+      const item = await planItemsDb.update(run.planItemId, { workflowRunId: null, status: 'pending', updatedAt: new Date().toISOString() });
+      if (item) emit({ type: 'planItem', planItem: item });
+      return run.projectId;
+    });
+    if (!projectId) return;
+    await emitQueueChanged(projectId);
+    await advanceQueueIfIdle(projectId);
+  }
+
+  /** The early step the workflow a start with these options would run begins with — `executePlanItem`'s workflow choice; null when it has none. */
+  async function earlyStepForStart(planItemId: string, options: StartPlanItemOptions): Promise<string | null> {
+    const item = await getPlanItem(planItemId);
+    if (item.prConflict || item.testingSetup) return null;
+    const workflowId = options.workflowId ?? (isBug(item) ? await bugWorkflowId(item.projectId) : undefined);
+    const workflow = options.workflow ?? await resolveRunWorkflow(await getProject(item.projectId), workflowId);
+    return workflow ? earlyStepOf(workflow) : null;
   }
 
   /** The step Request changes on `approvalStep` re-runs: its `requestChangesToStepId` when that names an earlier step of the run's snapshot, otherwise the approval step itself (always, for a testing setup). */
@@ -3199,7 +3409,8 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
   /** Halts the run while keeping its worktree and session resumable; rejecting a testing setup uses the same path. */
   async function stopLocked(runId: string): Promise<WorkflowRunRecord> {
     const run = await requireWorkflowRun(runId);
-    if (run.status === 'completed' || run.status === 'stopped') throw await runNotActionable(run, 'be stopped');
+    // A held early run is left through Cancel waiting, which discards it.
+    if (run.status === 'completed' || run.status === 'stopped' || run.status === 'held') throw await runNotActionable(run, 'be stopped');
     await haltWorkflowRun(run);
     return requireWorkflowRun(runId);
   }
@@ -3498,6 +3709,7 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
   async function deletePlanItem(planItemId: string): Promise<void> {
     const item = await getPlanItem(planItemId);
     await rememberLegacyPlanningTasks(item);
+    await discardEarlyRunOf(item);
     const run = item.workflowRunId ? await workflowRunsDb.get(item.workflowRunId) : undefined;
     if (run && run.status !== 'completed' && run.status !== 'stopped') await haltWorkflowRun(run);
     const liveTasks = (await Promise.all(item.taskIds.map((id) => tasksDb.get(id))))
@@ -3509,6 +3721,12 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
     emit({ type: 'planItemDeleted', id: planItemId, projectId: item.projectId });
     await maybeAutoCompleteForItem(item);
     await advanceQueueIfIdle(item.projectId);
+  }
+
+  /** Discards the item's run when it is an early run (see `discardEarlyRun`). */
+  async function discardEarlyRunOf(item: PlanItemRecord): Promise<void> {
+    const run = item.workflowRunId ? await workflowRunsDb.get(item.workflowRunId) : undefined;
+    if (run?.early) await discardEarlyRun(run.id);
   }
 
   /**
@@ -3525,7 +3743,23 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
 
   /** `PATCH /api/plan-items/:id {archived}` — archives or restores an item, refusing to archive one whose work is really still running (PlanItemHasActiveTaskError). */
   async function archivePlanItem(planItemId: string, archived: boolean): Promise<PlanItemRecord> {
-    const item = await getPlanItem(planItemId);
+    let item = await getPlanItem(planItemId);
+    // An archived task no longer waits: its early run is discarded — also once released and only waiting for a
+    // slot, when `waiting` is already gone — and its early start or resume leaves the line.
+    if (archived) {
+      const run = item.workflowRunId ? await workflowRunsDb.get(item.workflowRunId) : undefined;
+      const queued = await planItemQueueDb.find((candidate) => candidate.planItemId === item.id && (candidate.early === true || !!candidate.resumeRunId));
+      if (run?.early || queued.length > 0 || item.waiting) {
+        if (run?.early) await discardEarlyRun(run.id);
+        for (const entry of queued) await planItemQueueDb.delete(entry.id);
+        if (item.waiting) {
+          const cleared = await planItemsDb.update(item.id, { waiting: undefined });
+          if (cleared) emit({ type: 'planItem', planItem: cleared });
+        }
+        await emitQueueChanged(item.projectId);
+        item = await getPlanItem(planItemId);
+      }
+    }
     if (archived && await isPlanItemLive(item)) throw new PlanItemHasActiveTaskError(item, 'archiving');
     const updated = await archivePlanItemRecord(planItemId, archived);
     emit({ type: 'planItem', planItem: updated });
@@ -3959,14 +4193,22 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
     return addPlanningTask(await requirePlanningSession(taskId), draft);
   }
 
-  async function updatePlanningTask(taskId: string, itemId: string, patch: Partial<PlanningTaskDraft>): Promise<PlanItemRecord> {
+  async function updatePlanningTask(taskId: string, itemId: string, patch: PlanningTaskPatch): Promise<PlanItemRecord> {
     const task = await requirePlanningSession(taskId);
     return serializeOn(planningLocks, task.projectId, async () => {
       await assertPlanningTask(task.projectId, itemId, 'editing');
-      const planItem = await editPlanningPlanItem(task.projectId, itemId, patch);
+      const planItem = await editPlanningPlanItem(task.projectId, itemId, await checkedPlanningPatch(itemId, patch));
       emit({ type: 'planItem', planItem });
       return planItem;
     });
+  }
+
+  /** A planning session sets "UI planning waits for parent" only on a task that has not started (DependencyConflictError otherwise). */
+  async function checkedPlanningPatch(itemId: string, patch: PlanningTaskPatch): Promise<PlanningTaskPatch> {
+    if (patch.uiPlanningWaitsForParent !== undefined && !isReadyForDependencies(await getPlanItem(itemId))) {
+      throw new DependencyConflictError('This task has already started, so "UI planning waits for parent" cannot change.');
+    }
+    return patch;
   }
 
   async function deletePlanningTask(taskId: string, itemId: string): Promise<void> {
@@ -3990,10 +4232,10 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
     });
   }
 
-  async function updateProjectTask(projectId: string, itemId: string, patch: Partial<PlanningTaskDraft>): Promise<PlanItemRecord> {
+  async function updateProjectTask(projectId: string, itemId: string, patch: PlanningTaskPatch): Promise<PlanItemRecord> {
     return serializeOn(planningLocks, projectId, async () => {
       await assertPlanningTask(projectId, itemId, 'editing');
-      const planItem = await editPlanningPlanItem(projectId, itemId, patch);
+      const planItem = await editPlanningPlanItem(projectId, itemId, await checkedPlanningPatch(itemId, patch));
       emit({ type: 'planItem', planItem });
       return planItem;
     });
@@ -4109,6 +4351,9 @@ export function createWorkerManager(deps: WorkerManagerDeps = {}) {
     advanceQueueIfIdle,
     removeQueuedPlanItemExecution,
     reorderPlanItemQueue,
+    earlyStepForStart,
+    releaseHeldRun,
+    discardEarlyRun,
     completePlanItem,
     deletePlanItem,
     archivePlanItem,
@@ -4460,15 +4705,21 @@ function isReadOnlySetup(setup: { readOnly: boolean; canRunCommands?: boolean })
 const COMMAND_STEP_DISALLOWED_TOOLS = PLAN_DISALLOWED_TOOLS.filter((tool) => !['Bash', 'BashOutput', 'KillShell'].includes(tool));
 
 /**
- * The session-scoped MCP servers a Task's CLI session gets: its own control API (planning, bug report or step), plus the testing tools when allowed.
+ * The session-scoped MCP servers a Task's CLI session gets: its own control API (planning, bug report or step), plus the testing tools when allowed
+ * and the headless browser for a step with `canUseBrowser` (left out, with a log line, when it isn't installed; the step prompt says so).
  * Every session of a Building with an outgoing link also gets the capability tools; what each may call is decided per call, by the daemon.
  */
-async function sessionMcpServers(task: TaskRecord, testing: boolean): Promise<McpServerLaunch[]> {
+export async function sessionMcpServers(task: TaskRecord, testing: boolean, browser = false, probeBrowser = checkBrowserAvailability): Promise<McpServerLaunch[]> {
   const servers: McpServerLaunch[] = [];
   if (task.workflowRunId) servers.push(stepTaskMcpServer(task.id));
   else if (isPlanAndBugsSession(task)) servers.push(planAndBugsMcpServer(task.id));
   else if (task.kind === 'plan') servers.push(isBugReportSession(task) ? bugReportMcpServer(task.id) : planTaskMcpServer(task.id));
   if (testing) servers.push(testTaskMcpServer(task.id));
+  if (browser) {
+    const availability = probeBrowser();
+    if (availability.available) servers.push(browserMcpServer(task.id, availability.cliPath));
+    else console.warn(`Browser unavailable for task ${task.id}: ${availability.reason}. Starting the session without it.`);
+  }
   if (!isBugReportSession(task) && await connections.hasOutgoingLinks(task.projectId)) servers.push(capabilityMcpServer(task.id));
   return servers;
 }
@@ -4506,12 +4757,13 @@ async function snapshotStep(task: TaskRecord) {
  * locking out a step engine bug's session with no way to fix itself; a testing setup fails closed
  * instead (see `stepCanEditCode`).
  */
-async function resolveStepPermissions(task: TaskRecord, isManager: boolean): Promise<{ disallowedTools: string[] | undefined; readOnly: boolean; canRunCommands?: boolean }> {
-  if (await stepCanEditCode(task)) return { disallowedTools: undefined, readOnly: false };
-  // A testing setup's proposal step keeps its fail-closed read-only defense and never gets command access.
+export async function resolveStepPermissions(task: TaskRecord, isManager: boolean): Promise<{ disallowedTools: string[] | undefined; readOnly: boolean; canRunCommands?: boolean; canUseBrowser?: boolean }> {
   const { run, step } = await snapshotStep(task);
+  const canUseBrowser = step?.canUseBrowser === true && !run?.testingSetup;
+  if (await stepCanEditCode(task)) return { disallowedTools: undefined, readOnly: false, ...(canUseBrowser ? { canUseBrowser } : {}) };
+  // A testing setup's proposal step keeps its fail-closed read-only defense and never gets command access or the browser.
   if (step?.canRunCommands === true && !run?.testingSetup) {
-    return { disallowedTools: filterForManager(COMMAND_STEP_DISALLOWED_TOOLS, isManager), readOnly: true, canRunCommands: true };
+    return { disallowedTools: filterForManager(COMMAND_STEP_DISALLOWED_TOOLS, isManager), readOnly: true, canRunCommands: true, ...(canUseBrowser ? { canUseBrowser } : {}) };
   }
   return { disallowedTools: filterForManager(PLAN_DISALLOWED_TOOLS, isManager), readOnly: true };
 }
@@ -4612,11 +4864,6 @@ function serializeOn<T>(locks: Map<string, Promise<unknown>>, key: string, fn: (
   const run = prior.then(fn, fn);
   locks.set(key, run.then(() => undefined, () => undefined));
   return run;
-}
-
-/** Whether this executor is a supported interactive-CLI kind — every valid ExecutorProfile.kind is one now, so this only ever returns false for a stale/hand-edited executors.json entry. */
-function isInteractiveCli(executor: ExecutorProfile): boolean {
-  return executor.kind === 'claude-cli' || executor.kind === 'codex-cli';
 }
 
 /** `planInstructions` overrides the static `PLAN_INSTRUCTIONS` for a 'plan'-kind Task — see `buildPlanningInstructions`, which folds in the Project's resolved Workflow's step list (task 3.012). */

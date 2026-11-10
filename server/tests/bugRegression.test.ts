@@ -26,7 +26,7 @@ let collections: typeof import('../src/db/collections.ts');
 let bugs: typeof import('../src/projects/bugs.ts');
 let workflowPrompt: typeof import('../src/worker/workflowPrompt.ts');
 let GitError: typeof import('../src/projects/git.ts')['GitError'];
-let executorService: typeof import('../src/executors/executorService.ts');
+let defaultExecutorStore: typeof import('../src/executors/defaultExecutorInstance.ts')['defaultExecutorStore'];
 
 type Manager = ReturnType<typeof import('../src/worker/workerManager.ts')['createWorkerManager']>;
 
@@ -55,7 +55,7 @@ before(async () => {
   bugs = await import('../src/projects/bugs.ts');
   workflowPrompt = await import('../src/worker/workflowPrompt.ts');
   ({ GitError } = await import('../src/projects/git.ts'));
-  executorService = await import('../src/executors/executorService.ts');
+  ({ defaultExecutorStore } = await import('../src/executors/defaultExecutorInstance.ts'));
   await workflowService.createWorkflow({ id: 'bug-fix', name: 'Bug Fix', description: 'Fix a reported bug.', branchType: 'bugfix', steps: STEPS });
 });
 
@@ -485,11 +485,14 @@ test('U24 I26 the previous run\'s agent is reused; one that is gone falls back t
 
   await collections.workflowRunsDb.update(kept.run.id, { executorId: 'agent-that-was-removed' });
   await collections.planItemsDb.update(h.bugId, { executorId: 'agent-that-was-removed' });
-  const fallback = await reopen(h, 'Agent removed.');
-  const defaultAgent = await executorService.getDefaultExecutor();
-  assert.ok(defaultAgent);
-  assert.equal(fallback.run.executorId, defaultAgent!.id);
-  await h.manager.stopWorkflowRun(fallback.run.id);
+  await defaultExecutorStore.set({ executorId: 'test-claude-cli-alt', label: 'Alt' });
+  try {
+    const fallback = await reopen(h, 'Agent removed.');
+    assert.equal(fallback.run.executorId, 'test-claude-cli-alt', 'the owner\'s selected default, not the first configured agent');
+    await h.manager.stopWorkflowRun(fallback.run.id);
+  } finally {
+    await defaultExecutorStore.clear();
+  }
 });
 
 test('I12 an agent that cannot run the steps refuses the start and records nothing', async () => {

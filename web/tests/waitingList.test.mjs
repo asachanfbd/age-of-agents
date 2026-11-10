@@ -147,7 +147,8 @@ test('the Start dialog queues quietly: no limit alert for a queued start, a note
 test('the card offers Remove from waiting list only for a queued task, without a confirmation', () => {
   const board = source('../src/ui/project-popup/TaskBoard.tsx');
   assert.match(board, /\{queued && onRemoveFromWaitingList && \([\s\S]*onClick=\{onRemoveFromWaitingList\}>Remove from waiting list<\/Button>/);
-  assert.match(board, /onRemoveFromWaitingList=\{row\.queued \? \(\) => handlers\.onRemoveFromWaitingList\(row\.queued!\.entryId\) : undefined\}/);
+  assert.match(board, /const removable = row\.queued && !row\.earlyPhase;/, 'an early UI Planning start leaves the line only through its switch or Cancel waiting');
+  assert.match(board, /onRemoveFromWaitingList=\{removable \? \(\) => handlers\.onRemoveFromWaitingList\(row\.queued!\.entryId\) : undefined\}/);
   assert.match(source('../src/ui/project-popup/TasksPanel.tsx'), /onRemoveFromWaitingList: \(entryId\) => void actions\.removeFromWaitingList\(entryId\)/);
 });
 

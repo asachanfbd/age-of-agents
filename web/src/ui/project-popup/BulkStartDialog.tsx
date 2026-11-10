@@ -6,10 +6,13 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { UI_WAITS_LABEL } from '../../lib/earlyUiPlanning';
 import {
-  bulkLimitNote, checkedRows, classifyStart, createBulkRunner, DEFAULTS_NOTE, failedIds, liveOverride, lockedAgentLabel, NO_WORKFLOW_NOTE,
-  NOT_SELECTED_STATUS, PLAY_BUTTON_LABEL, playButtonState, progressLine, rowAgentId, rowPickerEnabled, rowStartOptions, rowStatusText,
-  SAME_AS_ALL, sameAsAllLabel, selectableIds, selectionSummary, setOverride, startBlockReason, startButtonLabel, summaryLine, toggleChecked, waitsForText,
+  AUTO_MERGE_ALL_DEFAULT, bulkEarlyRowsNote, bulkLimitNote, checkedRows, classifyStart, createBulkRunner, DEFAULTS_NOTE, failedIds, liveOverride, lockedAgentLabel,
+  lockedAutoMergeLabel, NO_WORKFLOW_NOTE, NOT_SELECTED_STATUS, PLAY_BUTTON_LABEL, playButtonState, progressLine, rowAutoMerge, rowPickerEnabled, rowRunsEarly,
+  rowSendOptions, rowStatusText, SAME_AS_ALL, sameAsAllLabel, selectableIds, selectionSummary, setAutoMergeOverride, setOverride, startBlockReason,
+  startButtonLabel, summaryLine, toggleChecked, waitsForText,
 } from '../../lib/bulkStart';
 import type { BulkPhase, BulkRow, BulkRunner, RowResult } from '../../lib/bulkStart';
 import type { StartConfirmParent } from '../../lib/dependencies';
@@ -73,6 +76,10 @@ export function BulkStartDialog({
   const shown = frozen ?? rows;
   const [checked, setChecked] = useState<string[]>(() => selectableIds(rows));
   const [overrides, setOverrides] = useState<Record<string, string>>({});
+  /** Each row's "UI planning waits for parent", as changed here; a row left out keeps its stored value. */
+  const [waits, setWaits] = useState<Record<string, boolean>>({});
+  const [autoMergeAll, setAutoMergeAll] = useState(AUTO_MERGE_ALL_DEFAULT);
+  const [autoMergeOverrides, setAutoMergeOverrides] = useState<Record<string, boolean>>({});
   const [results, setResults] = useState<Record<string, RowResult>>({});
   const [sent, setSent] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
@@ -80,16 +87,15 @@ export function BulkStartDialog({
   const retryRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
-  // Each start reads the agent picked at the moment it is sent, so a retry uses the new pick.
-  const latest = useRef({ shown, overrides, commonId, executors, now, hasRepository, start, queue });
-  latest.current = { shown, overrides, commonId, executors, now, hasRepository, start, queue };
+  // Each start reads the agent, Auto-merge and UI planning choice made at the moment it is sent, so a retry uses the new choice.
+  const latest = useRef({ shown, overrides, waits, parents, commonId, executors, now, hasRepository, autoMergeAll, autoMergeOverrides, start, queue });
+  latest.current = { shown, overrides, waits, parents, commonId, executors, now, hasRepository, autoMergeAll, autoMergeOverrides, start, queue };
   const runner = useRef<BulkRunner | null>(null);
   runner.current ??= createBulkRunner(async (id) => {
     const current = latest.current;
-    const row = current.shown.find((candidate) => candidate.id === id)!;
-    const agent = rowAgentId(current.executors, current.commonId, current.overrides[id], current.now);
-    const runId = await current.start(row, rowStartOptions(row, agent, current.hasRepository));
-    return classifyStart(runId, current.queue(), id);
+    const { row, options } = rowSendOptions(current, id);
+    const runId = await current.start(row, options);
+    return classifyStart(runId, current.queue(), id, rowRunsEarly(row, options.uiPlanningWaitsForParent === true, current.parents[id]));
   }, (id, result) => setResults((previous) => ({ ...previous, [id]: result })));
 
   const phase: BulkPhase = running ? 'running' : Object.keys(results).length > 0 ? 'done' : 'idle';
@@ -132,6 +138,9 @@ export function BulkStartDialog({
           rows={shown}
           checked={checked}
           overrides={overrides}
+          waits={waits}
+          autoMergeAll={autoMergeAll}
+          autoMergeOverrides={autoMergeOverrides}
           results={results}
           sent={sent}
           phase={phase}
@@ -148,6 +157,9 @@ export function BulkStartDialog({
           onSelectAll={() => setChecked(selectableIds(shown))}
           onSelectNone={() => setChecked([])}
           onOverride={(id, value) => setOverrides((current) => setOverride(current, id, value))}
+          onWaitsChange={(id, value) => setWaits((current) => ({ ...current, [id]: value }))}
+          onAutoMergeAllChange={setAutoMergeAll}
+          onAutoMergeOverride={(id, value) => setAutoMergeOverrides((current) => setAutoMergeOverride(current, id, value))}
           onStart={startAll}
           onRetry={retryFailed}
           onClose={onClose}
@@ -185,10 +197,18 @@ function useParentLookups(rows: readonly BulkRow[], lookup: (itemId: string) => 
   return found;
 }
 
+const NO_WAITS: Readonly<Record<string, boolean>> = {};
+
 export interface BulkStartBodyProps {
   rows: readonly BulkRow[];
   checked: readonly string[];
   overrides: Readonly<Record<string, string>>;
+  /** Rows whose "UI planning waits for parent" was changed in the dialog. */
+  waits?: Readonly<Record<string, boolean>>;
+  /** The "Auto-merge for all" switch. */
+  autoMergeAll: boolean;
+  /** Rows with their own Auto-merge; the others follow the common switch. */
+  autoMergeOverrides: Readonly<Record<string, boolean>>;
   results: Readonly<Record<string, RowResult>>;
   /** The rows the current batch sends, in order. */
   sent: readonly string[];
@@ -209,6 +229,10 @@ export interface BulkStartBodyProps {
   onSelectAll: () => void;
   onSelectNone: () => void;
   onOverride: (id: string, value: string) => void;
+  onWaitsChange?: (id: string, value: boolean) => void;
+  onAutoMergeAllChange: (next: boolean) => void;
+  /** null clears the row's own value ("Same as all"). */
+  onAutoMergeOverride: (id: string, value: boolean | null) => void;
   onStart: () => void;
   onRetry: () => void;
   onClose: () => void;
@@ -224,9 +248,12 @@ export function BulkStartBody(props: BulkStartBodyProps) {
   const failed = failedIds(rows, results);
   const progress = progressLine(props.sent, results);
   const idle = phase === 'idle';
+  const waits = props.waits ?? NO_WAITS;
+  const earlyNote = bulkEarlyRowsNote(rows, checked, waits, parents);
   return (
     <div className="grid min-w-0 gap-4">
       <CodingAgentPicker executors={executors} value={commonId} onChange={props.onCommonChange} id="bulk-start-agent" label="Coding agent for all" disabled={!idle} />
+      {hasRepository && <AutoMergeAllField checked={props.autoMergeAll} disabled={!idle} onChange={props.onAutoMergeAllChange} />}
       <div className="grid min-w-0 gap-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className="text-sm font-medium" id="bulk-start-tasks-label">Tasks · <span data-selection-count>{selection.text}</span></span>
@@ -236,10 +263,11 @@ export function BulkStartBody(props: BulkStartBodyProps) {
           </span>
         </div>
         <ul aria-labelledby="bulk-start-tasks-label" className="max-h-[min(22rem,50vh)] overflow-y-auto rounded-md border">
-          {rows.map((row) => <BulkStartRow key={row.id} row={row} {...props} isChecked={checked.includes(row.id)} result={results[row.id]} waits={waitsForText(parents[row.id])} />)}
+          {rows.map((row) => <BulkStartRow key={row.id} row={row} {...props} waits={waits} isChecked={checked.includes(row.id)} result={results[row.id]} waitsFor={waitsForText(parents[row.id])} />)}
         </ul>
       </div>
       {idle && <p className="text-xs text-muted-foreground" data-defaults-note>{DEFAULTS_NOTE}</p>}
+      {idle && earlyNote && <p className="text-xs text-muted-foreground" data-early-note>{earlyNote}</p>}
       {limitNote && <p className="text-xs text-muted-foreground" data-full-note>{limitNote}</p>}
       <p className="text-xs text-muted-foreground empty:hidden" aria-live="polite" data-progress>{phase === 'running' ? progress : phase === 'done' ? summaryLine(results) : ''}</p>
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -261,7 +289,9 @@ export function BulkStartBody(props: BulkStartBodyProps) {
 }
 
 /** One card's row: its checkbox and label (type, number, info marker, title, what it waits for), its agent and, once sent, its result. */
-function BulkStartRow({ row, isChecked, result, waits, phase, executors, commonId, overrides, now, onToggle, onOverride }: BulkStartBodyProps & { row: BulkRow; isChecked: boolean; result: RowResult | undefined; waits: string | null }) {
+function BulkStartRow({ row, isChecked, result, waitsFor, phase, executors, commonId, overrides, waits, now, hasRepository, autoMergeAll, autoMergeOverrides, onToggle, onOverride, onWaitsChange, onAutoMergeOverride }: BulkStartBodyProps & { row: BulkRow; isChecked: boolean; result: RowResult | undefined; waitsFor: string | null }) {
+  const uiWaits = waits?.[row.id] ?? row.uiPlanningWaitsForParent;
+  const switchId = `bulk-start-row-${row.id}-ui-waits`;
   const checkboxId = `bulk-start-row-${row.id}`;
   const override = overrides[row.id];
   const own = liveOverride(executors, override, now);
@@ -279,7 +309,7 @@ function BulkStartRow({ row, isChecked, result, waits, phase, executors, commonI
               {row.needsMoreInfo && <Badge variant="warning">Needs more info</Badge>}
             </span>
             <span className="line-clamp-2 text-sm leading-5 [overflow-wrap:anywhere]" title={row.title}>{row.title}</span>
-            {waits && <span className="text-xs text-muted-foreground" data-waits>{waits}</span>}
+            {waitsFor && <span className="text-xs text-muted-foreground" data-waits>{waitsFor}</span>}
             {row.locked && <span className="text-xs text-muted-foreground" data-locked>{NO_WORKFLOW_NOTE}</span>}
           </Label>
         </div>
@@ -301,13 +331,75 @@ function BulkStartRow({ row, isChecked, result, waits, phase, executors, commonI
           ) : (
             <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground"><Bot className="size-3.5 shrink-0" aria-hidden="true" /><span className="truncate">{lockedAgentLabel(executors, commonId, override, now)}</span></span>
           )}
+          {hasRepository && (
+            <RowAutoMerge
+              id={`${checkboxId}-auto-merge`}
+              title={row.title}
+              common={autoMergeAll}
+              override={autoMergeOverrides[row.id]}
+              editable={pickerEnabled || phase === 'idle'}
+              enabled={pickerEnabled}
+              onChange={(value) => onAutoMergeOverride(row.id, value)}
+            />
+          )}
         </div>
       </div>
+      {/* Outside the checkbox's Label, so toggling it never toggles the row. */}
+      {row.hasParents && row.earlyStep && (
+        <div className="flex items-center gap-2 pl-6" data-row-ui-waits>
+          <Switch id={switchId} size="sm" checked={uiWaits} disabled={phase !== 'idle'} aria-label={`${UI_WAITS_LABEL}: ${row.kind}${row.number ? ` ${row.number}` : ` ${row.title}`}`} onCheckedChange={(value) => onWaitsChange?.(row.id, value)} />
+          <span aria-hidden="true" className="text-xs text-muted-foreground">{UI_WAITS_LABEL}</span>
+        </div>
+      )}
       {status && (
         result?.status === 'failed'
           ? <p role="alert" className="text-xs break-words text-destructive">{status}</p>
           : <p className="flex items-center gap-1 text-xs text-muted-foreground">{result?.status === 'starting' && <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />}{status}</p>
       )}
     </li>
+  );
+}
+
+/** "Auto-merge for all": the value every row without its own follows. Laid out like the Start task dialog's Auto-merge field. */
+function AutoMergeAllField({ checked, disabled, onChange }: { checked: boolean; disabled: boolean; onChange: (next: boolean) => void }) {
+  return (
+    <div className="grid gap-1" data-auto-merge-all>
+      <div className="flex items-center justify-between gap-3">
+        <Label htmlFor="bulk-start-auto-merge" className="font-normal">Auto-merge for all</Label>
+        <Switch id="bulk-start-auto-merge" checked={checked} disabled={disabled} onCheckedChange={onChange} aria-describedby="bulk-start-auto-merge-note" />
+      </div>
+      <p id="bulk-start-auto-merge-note" className="text-xs text-muted-foreground">Merges each task&apos;s pull request once it completes.</p>
+    </div>
+  );
+}
+
+/**
+ * A row's Auto-merge: a switch showing its own value or the common one, with "Same as all" to follow
+ * the common switch again; plain text once the row is locked. Toggling the switch makes the value the row's own.
+ */
+function RowAutoMerge({ id, title, common, override, editable, enabled, onChange }: {
+  id: string;
+  title: string;
+  common: boolean;
+  override: boolean | undefined;
+  /** False once the row is locked after a batch: text instead of a switch. */
+  editable: boolean;
+  enabled: boolean;
+  onChange: (value: boolean | null) => void;
+}) {
+  if (!editable) {
+    return <span className="mt-1 flex min-w-0 items-center gap-1 text-xs text-muted-foreground" data-auto-merge-locked><GitMerge className="size-3.5 shrink-0" aria-hidden="true" /><span className="truncate">{lockedAutoMergeLabel(common, override)}</span></span>;
+  }
+  const overridden = override !== undefined;
+  return (
+    <div className="mt-1 flex items-center justify-between gap-2">
+      <span className="flex min-w-0 items-center gap-1">
+        <Label htmlFor={id} data-auto-merge-overridden={overridden || undefined} className="text-xs font-normal text-muted-foreground data-[auto-merge-overridden=true]:font-semibold data-[auto-merge-overridden=true]:text-foreground">Auto-merge</Label>
+        {overridden && (
+          <Button type="button" variant="link" className="h-6 px-1 text-xs" disabled={!enabled} aria-label={`Use auto-merge for all for ${title}`} onClick={() => onChange(null)}>Same as all</Button>
+        )}
+      </span>
+      <Switch id={id} checked={rowAutoMerge(common, override)} disabled={!enabled} onCheckedChange={onChange} aria-label={`Auto-merge for ${title}`} />
+    </div>
   );
 }

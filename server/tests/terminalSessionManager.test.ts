@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { chmodSync, statSync } from 'node:fs';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import path, { join } from 'node:path';
 import test from 'node:test';
 import { claudeReadOnlyDirArgs, HOOK_ENV_KEYS, interactiveCliArgs } from '../src/terminal/terminalSessionManager.ts';
 import { claudeMcpArgs, codexMcpArgs } from '../src/terminal/mcpServers.ts';
@@ -416,5 +416,29 @@ test('Codex: skill dirs need no extra argument; its sandboxes already read absol
     assert.deepEqual(args.slice(0, sandbox.length), [...sandbox]);
     assert.ok(args.includes(`developer_instructions=${JSON.stringify(indexPrompt)}`));
     assert.ok(!args.some((arg) => arg.includes('/srv/catalog/skills/') && !arg.startsWith('developer_instructions=')), 'no per-dir sandbox option');
+  }
+});
+
+test('killProcessGroupOnExit stops a background child the CLI left running', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pty-group-'));
+  try {
+    const script = path.join(dir, 'fake-cli.sh');
+    const pidFile = path.join(dir, 'child.pid');
+    await writeFile(script, '#!/bin/sh\nnohup sleep 60 >/dev/null 2>&1 &\necho $! > "$PIDFILE"\n', { mode: 0o755 });
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('PTY process did not exit')), 3_000);
+      new TerminalSessionManager().start({
+        taskId: 'group-kill', kind: 'claude-cli', bin: script, cwd: dir, env: { PIDFILE: pidFile }, prompt: '', systemPrompt: '', autonomy: 'approval',
+        killProcessGroupOnExit: true, onExit: () => { clearTimeout(timeout); resolve(); },
+      });
+    });
+    const child = Number((await readFile(pidFile, 'utf8')).trim());
+    const alive = () => { try { process.kill(child, 0); return true; } catch { return false; } };
+    const deadline = Date.now() + 3_000;
+    while (alive() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(alive(), false, 'the leftover child was terminated with its group');
+    if (alive()) process.kill(child, 'SIGKILL');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 });

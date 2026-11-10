@@ -34,12 +34,23 @@ export function agentConfigFromRecord(config: WorkflowAgentConfig): AgentConfigF
   };
 }
 
+/** Whether the step has a shell (it can edit code or run commands), which the browser needs to start the app. */
+export function stepHasShell(step: Pick<StepFields, 'canEditCode' | 'canRunCommands'>): boolean {
+  return step.canEditCode || step.canRunCommands;
+}
+
+/** A step with the browser on but no shell permission left; the server rejects it, so the editor flags it. */
+export function browserLacksShell(step: Pick<StepFields, 'canEditCode' | 'canRunCommands' | 'canUseBrowser'>): boolean {
+  return step.canUseBrowser && !stepHasShell(step);
+}
+
 /** One `steps` row's form fields. `isNew`/`idTouched` drive the same "typing the name suggests an id, until you edit it yourself" behaviour as `useSlugFollowingId` — id stays editable only while `isNew`. */
 export interface StepFields extends AgentConfigFields {
   id: string;
   name: string;
   canEditCode: boolean;
   canRunCommands: boolean;
+  canUseBrowser: boolean;
   requiresApproval: boolean;
   isNew: boolean;
   idTouched: boolean;
@@ -51,6 +62,8 @@ export interface StepFields extends AgentConfigFields {
   requestChangesEnabled: boolean;
   requestChangesToStepId: string;
   quickLook: QuickLookKind;
+  /** Saved as `requiredOutputFormat: 'html'` when on; see WorkflowStep.requiredOutputFormat. */
+  requiresHtmlOutput: boolean;
 }
 
 export function emptyStep(): StepFields {
@@ -59,6 +72,7 @@ export function emptyStep(): StepFields {
     name: '',
     canEditCode: false,
     canRunCommands: false,
+    canUseBrowser: false,
     requiresApproval: false,
     isNew: true,
     idTouched: false,
@@ -68,6 +82,7 @@ export function emptyStep(): StepFields {
     requestChangesEnabled: false,
     requestChangesToStepId: '',
     quickLook: 'none',
+    requiresHtmlOutput: false,
     ...emptyAgentConfig(),
   };
 }
@@ -80,6 +95,7 @@ export function stepFromRecord(step: WorkflowStep): StepFields {
     name: step.name,
     canEditCode: step.canEditCode,
     canRunCommands: step.canRunCommands === true,
+    canUseBrowser: step.canUseBrowser === true,
     requiresApproval: step.requiresApproval,
     isNew: false,
     idTouched: true,
@@ -89,6 +105,7 @@ export function stepFromRecord(step: WorkflowStep): StepFields {
     requestChangesEnabled: !!step.requestChangesToStepId,
     requestChangesToStepId: step.requestChangesToStepId ?? '',
     quickLook: step.quickLook ?? 'none',
+    requiresHtmlOutput: step.requiredOutputFormat === 'html',
   };
 }
 
@@ -216,6 +233,7 @@ export function toWorkflowStep(fields: StepFields): WorkflowStep {
     name: fields.name.trim(),
     canEditCode: fields.canEditCode,
     canRunCommands: fields.canRunCommands,
+    canUseBrowser: fields.canUseBrowser,
     requiresApproval: fields.requiresApproval,
     quickLook: fields.quickLook,
   };
@@ -223,6 +241,7 @@ export function toWorkflowStep(fields: StepFields): WorkflowStep {
     step.loopBack = { toStepId: fields.loopBackToStepId, maxRounds: Number.parseInt(fields.loopBackMaxRounds, 10) };
   }
   if (fields.requiresApproval && fields.requestChangesEnabled) step.requestChangesToStepId = fields.requestChangesToStepId;
+  if (fields.requiresHtmlOutput) step.requiredOutputFormat = 'html';
   return step;
 }
 

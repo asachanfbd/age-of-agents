@@ -229,6 +229,36 @@ test('/api/workflow-steps/complete rejects a non-string planningGap before touch
   assert.equal(res.body.error, 'planningGap must be a string');
 });
 
+test('B036 /api/workflow-steps/complete rejects malformed outputs with 400 before touching the step', async () => {
+  const { CLI_HOOK_TOKEN } = await import('../src/terminal/projectCliHooks.ts');
+  const complete = (outputs: unknown) => api('/api/workflow-steps/complete?taskId=whatever', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${CLI_HOOK_TOKEN}` },
+    body: JSON.stringify({ summary: 'x', outputs }),
+  });
+  const cases: [unknown, RegExp][] = [
+    ['not-json', /outputs must be an array/],
+    [42, /outputs must be an array/],
+    [{}, /outputs must be an array/],
+    ['"str"', /outputs must be an array/],
+    [[null], /outputs\[0\] must be an object/],
+    [[{ name: '', format: 'html', content: 'x' }], /outputs\[0\]\.name is required/],
+    [[{ name: 'a', format: 'pdf', content: 'x' }], /outputs\[0\]\.format must be "markdown" or "html"/],
+    [[{ name: 'a', format: 'html', content: 'x' }, { name: 'b', format: 'html' }], /outputs\[1\]\.content must be a string/],
+  ];
+  for (const [outputs, message] of cases) {
+    const res = await complete(outputs);
+    assert.equal(res.status, 400, JSON.stringify(outputs));
+    assert.match(res.body.error, message);
+  }
+
+  // A JSON-string array passes validation and reaches the step lookup (a fake task id is not a running step).
+  const stringified = await complete(JSON.stringify([{ name: 'Screen', format: 'html', content: '<html></html>' }]));
+  assert.equal(stringified.status, 401);
+  const absent = await complete(null);
+  assert.equal(absent.status, 401);
+});
+
 /** `/api/workflow-steps/progress` (task 5.017) body-shape validation — auth and limits only; see
  * workflowRunEngine.test.ts for coverage against a genuinely running step session (this file's fixture
  * executors never actually reach "running" — see this file's own doc comment). */

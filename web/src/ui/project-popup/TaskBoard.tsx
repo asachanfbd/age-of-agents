@@ -7,6 +7,9 @@ import { AutoMergeChip } from './AutoMergeControl';
 import { PrBadge, PrHint, PrOpenTag } from './TaskPrStatus';
 import type { TaskPrView } from '../../lib/taskPullRequest';
 import { WaitingBanner } from './DependenciesControl';
+import { UiPlanningWaitsSwitch } from './UiPlanningWaitsSwitch';
+import { useWorldStore } from '../../store/worldStore';
+import { earlyPhaseLine, openCardStatus } from '../../lib/earlyUiPlanning';
 import { DependsOnPicker } from './DependsOnPicker';
 import { dependencyChip, waitingView } from '../../lib/dependencies';
 import type { WaitingData } from '../../types';
@@ -189,6 +192,8 @@ export function TaskCard({
   onRemoveFromWaitingList,
   dependsOnLabels,
   dependsOnPicker,
+  uiWaitsSwitch,
+  earlyPhaseLine,
   planning = false,
   dragHandle = false,
   typeLabel,
@@ -223,6 +228,10 @@ export function TaskCard({
   dependsOnLabels?: string[];
   /** The "Depends on…" picker; given only for a task whose dependencies can be edited. */
   dependsOnPicker?: ReactNode;
+  /** The "UI planning waits for parent" switch, outside the click area above "Depends on…". */
+  uiWaitsSwitch?: ReactNode;
+  /** How far an early UI Planning has got, above the waiting banner. When it names the slot line, the plain queued line is left out. */
+  earlyPhaseLine?: { text: string; queued: boolean } | null;
   planning?: boolean;
   dragHandle?: boolean;
   typeLabel?: string;
@@ -288,8 +297,9 @@ export function TaskCard({
         <PrHint pr={pr} />
         {progressLine && <p className="mt-1.5 truncate text-xs font-medium">{progressLine}</p>}
         {dependencyChip(dependsOnLabels) && <p className="mt-1.5 line-clamp-2 text-xs break-words text-muted-foreground" data-depends-chip title={dependencyChip(dependsOnLabels)!}>{dependencyChip(dependsOnLabels)}</p>}
-        {waiting && !queued && <WaitingBanner waiting={waitingView(waiting)!} />}
-        {queued && <p className="mt-1.5 truncate text-xs font-medium text-muted-foreground" data-queued-banner title={queuedBadge(queued.position)}>{queuedBadge(queued.position)}</p>}
+        {earlyPhaseLine && <p className="mt-1.5 truncate text-xs font-medium" data-early-phase title={earlyPhaseLine.text}>{earlyPhaseLine.text}</p>}
+        {waiting && (!queued || earlyPhaseLine?.queued) && <WaitingBanner waiting={waitingView(waiting)!} />}
+        {queued && !earlyPhaseLine?.queued && <p className="mt-1.5 truncate text-xs font-medium text-muted-foreground" data-queued-banner title={queuedBadge(queued.position)}>{queuedBadge(queued.position)}</p>}
         <p className="mt-2 flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
           {agent && (
             <>
@@ -307,6 +317,7 @@ export function TaskCard({
           )}
         </p>
       </div>
+      {uiWaitsSwitch}
       {dependsOnPicker}
       {queued && onRemoveFromWaitingList && (
         <div className="px-3 pb-3">
@@ -339,6 +350,10 @@ export function OpenTaskCard({
   nested?: boolean;
 }) {
   const progressLine = useCardProgressLine(row.progress);
+  const item = useWorldStore((s) => (row.dependsOn?.length ? s.planByProject[handlers.projectId]?.items.find((entry) => entry.id === row.id) : undefined));
+  const phaseText = earlyPhaseLine(row.earlyPhase ?? null);
+  // An early start waits in the slot line under its own phase line, and leaves it only through the switch or Cancel waiting.
+  const removable = row.queued && !row.earlyPhase;
   return (
     <TaskCard
       title={row.title}
@@ -353,10 +368,12 @@ export function OpenTaskCard({
       prOwner={{ projectId: handlers.projectId, itemId: row.id }}
       waiting={row.waiting}
       queued={row.queued}
-      onRemoveFromWaitingList={row.queued ? () => handlers.onRemoveFromWaitingList(row.queued!.entryId) : undefined}
+      onRemoveFromWaitingList={removable ? () => handlers.onRemoveFromWaitingList(row.queued!.entryId) : undefined}
       dependsOnLabels={row.dependsOnLabels}
+      uiWaitsSwitch={item ? <UiPlanningWaitsSwitch item={item} surface="card" /> : undefined}
       dependsOnPicker={row.canEdit && !row.archived ? <DependsOnPicker projectId={handlers.projectId} itemId={row.id} /> : undefined}
-      status={row.queued ? null : row.waiting ? waitingView(row.waiting)!.badge : row.state === 'todo' ? null : row.state === 'executing' ? 'Running' : row.state === 'blocked' ? 'Needs you' : row.state === 'failed' ? 'Failed' : row.state === 'stopped' || row.state === 'paused' ? 'Stopped' : null}
+      earlyPhaseLine={phaseText ? { text: phaseText, queued: row.earlyPhase?.kind === 'queued' } : null}
+      status={openCardStatus(row)}
       progressLine={progressLine}
       typeLabel={row.typeLabel}
       bug={row.bug}

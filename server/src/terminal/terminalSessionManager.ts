@@ -1,6 +1,7 @@
 import * as pty from 'node-pty';
 import { chmodSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { terminateProcessGroup } from '../commands/processGroup.ts';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import type { Autonomy, ExecutorProfile } from '../domain/types.ts';
@@ -64,6 +65,8 @@ export interface TerminalSessionStart {
   readOnly?: boolean;
   /** With `readOnly`: the session may run shell commands (install, test, build), so Codex runs in a command-permitting sandbox with network access and still no approval escalation. Claude is held to "no file edits" through `disallowedTools`. */
   canRunCommands?: boolean;
+  /** Kill the CLI's whole process group when it exits, so a dev server it started doesn't outlive the session. */
+  killProcessGroupOnExit?: boolean;
   /**
    * Absolute folders outside the working directory the session may read without prompting but never
    * write (a step's saved earlier outputs — see worker/stepOutputFiles.ts). Claude gets a Read allow
@@ -311,6 +314,7 @@ export class TerminalSessionManager implements TerminalSessionHost {
         session.sessionId = codexSessionIdFromNewFile(codexSessionsRoot, input.cwd, existingCodexFiles);
         if (session.sessionId) input.onSessionId?.(session.sessionId);
       }
+      if (input.killProcessGroupOnExit) terminateProcessGroup(processHandle.pid);
       input.onExit(exitCode, signal, session.sessionId);
     });
   }

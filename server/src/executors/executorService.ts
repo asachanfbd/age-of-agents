@@ -13,7 +13,7 @@ export class ExecutorNotFoundError extends Error {
   }
 }
 
-/** Refuses to remove the last configured executor — startTask's getDefaultExecutor() needs at least one to fall back to. */
+/** Refuses to remove the last configured executor — a run started with no agent choice needs at least one to fall back to (see `fallbackExecutor.ts`). */
 export class LastExecutorError extends Error {
   constructor() {
     super('Cannot remove the last configured executor — at least one is required to start a Task');
@@ -42,11 +42,9 @@ export async function getExecutor(id: string): Promise<ExecutorProfile | undefin
   return executors.find((e) => e.id === id);
 }
 
-export async function getDefaultExecutor(): Promise<ExecutorProfile> {
-  const executors = await listExecutors();
-  const first = executors[0];
-  if (!first) throw new Error('No executors configured — see server/executors.example.json');
-  return first;
+/** Whether this executor is a supported interactive-CLI kind — every valid ExecutorProfile.kind is one now, so this only ever returns false for a stale/hand-edited executors.json entry. */
+export function isInteractiveCli(executor: ExecutorProfile): boolean {
+  return executor.kind === 'claude-cli' || executor.kind === 'codex-cli';
 }
 
 /** Fields a caller can set through the settings panel — everything except the server-assigned `id`. */

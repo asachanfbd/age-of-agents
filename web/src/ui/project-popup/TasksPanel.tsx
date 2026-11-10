@@ -20,6 +20,8 @@ import type { WorkflowRunRecord } from '../../lib/serverApi';
 import type { PlanItemData, ProjectData } from '../../types';
 import { ChainTasksDialog, ConfirmDialog, StartTaskDialog } from './TaskDialogs';
 import { dependencyForest, planLinkDrop, startConfirm } from '../../lib/dependencies';
+import { hasEarlyStep } from '../../lib/earlyUiPlanning';
+import { BugWorkflowIdContext } from './UiPlanningWaitsSwitch';
 import type { DependencyNode, StartConfirmParent } from '../../lib/dependencies';
 import { BulkStartDialog, StartPendingButton } from './BulkStartDialog';
 import { buildBulkRows } from '../../lib/bulkStart';
@@ -184,7 +186,10 @@ export function TasksPanel({ project, initialRunId = null, taskPanelSwap }: { pr
   const loading = plan === undefined || taskIds === undefined;
   const workflows = enabledWorkflows(catalogWorkflows);
   /** What a Start preselects its workflow from, for the single Start task dialog and the bulk start alike. */
-  const workflowDefaults = { projectDefaultId: initialStartWorkflowId(project, workflows), enabledIds: workflows.map((workflow) => workflow.id), bugWorkflowId };
+  const workflowDefaults = {
+    projectDefaultId: initialStartWorkflowId(project, workflows), enabledIds: workflows.map((workflow) => workflow.id), bugWorkflowId,
+    earlyStepWorkflowIds: workflows.filter((workflow) => hasEarlyStep(workflow.steps)).map((workflow) => workflow.id),
+  };
   /** The Planning column's startable cards, in display order, for "Start pending tasks". */
   const bulkRows = buildBulkRows(planningQueue, items, workflowDefaults);
   /** Writing tasks holding a slot right now; at the Project's cap a start waits in line. */
@@ -472,6 +477,7 @@ export function TasksPanel({ project, initialRunId = null, taskPanelSwap }: { pr
   }
 
   return (
+    <BugWorkflowIdContext.Provider value={bugWorkflowId}>
     <section className="flex min-h-0 flex-1 flex-col">
       {detailRunId ? (
         <WorkflowRunView key={`${detailRunId}:${runFocus?.stepId ?? ''}:${runFocus?.round ?? ''}`} runId={detailRunId} focus={runFocus} actions={actions} alerts={alerts} onBack={backFromDetail} />
@@ -547,6 +553,7 @@ export function TasksPanel({ project, initialRunId = null, taskPanelSwap }: { pr
           hasRepository={!!project.repositoryUrl}
           slotsInUse={slotsInUse}
           initialAutoMerge={items.find((candidate) => candidate.id === dialog.row.id)?.autoMerge?.enabled === true}
+          initialUiPlanningWaits={items.find((candidate) => candidate.id === dialog.row.id)?.uiPlanningWaitsForParent === true}
           onCancel={() => setDialog(null)}
           onOpenTask={openConflictTask}
           onStart={async (options) => {
@@ -594,5 +601,6 @@ export function TasksPanel({ project, initialRunId = null, taskPanelSwap }: { pr
         />
       )}
     </section>
+    </BugWorkflowIdContext.Provider>
   );
 }

@@ -159,7 +159,8 @@ function toTaskRow(
 ): FooterTaskRow {
   const { projectId, item, run, boards } = context;
   const executorId = row.workerId ?? run?.executorId ?? null;
-  const isWaiting = !run && !!(row.waiting || row.queued);
+  // A held early run waits for its parents (or a slot) like a task with no run yet.
+  const isWaiting = (!run || run.status === 'held') && !!(row.waiting || row.queued);
   const detail = isWaiting
     ? waitingReason(row)
     : kind === 'active' ? activeDetail(run) : kind === 'blocked' ? (run ? BLOCKED_REASONS[run.status] ?? 'Needs attention' : 'Waiting for your answer') : pendingDetail(item, boards.tasksById);

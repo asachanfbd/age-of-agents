@@ -28,6 +28,8 @@ import {
   DEFAULT_EXECUTOR_VALUE,
   addStep,
   agentOptionsFor,
+  browserLacksShell,
+  stepHasShell,
   buildCreateWorkflowInput,
   buildUpdateWorkflowPatch,
   earlierSteps,
@@ -970,6 +972,26 @@ function StepEditor({
           {step.canEditCode && <span className="block text-xs text-muted-foreground">Included with Can edit code.</span>}
         </span>
       </label>
+      <label className="flex items-start gap-2 text-sm">
+        <Switch
+          checked={step.canUseBrowser}
+          onCheckedChange={(checked) => onChange({ ...step, canUseBrowser: checked })}
+          disabled={pending || (!step.canUseBrowser && !stepHasShell(step))}
+          className="mt-0.5"
+        />
+        <span>
+          Can use browser
+          <span className={`block text-xs text-muted-foreground${!step.canUseBrowser && !stepHasShell(step) ? ' opacity-60' : ''}`}>
+            The step gets a headless browser it can drive to check the running app, for example opening pages, clicking through and taking screenshots. It needs a shell to start the app, so it also needs Can edit code or Can run commands.
+          </span>
+          {!step.canUseBrowser && !stepHasShell(step) && <span className="block text-xs text-muted-foreground">Turn on Can edit code or Can run commands first.</span>}
+          {browserLacksShell(step) && (
+            <span role="alert" className="block text-xs text-destructive">
+              Error: Can use browser needs Can edit code or Can run commands. Turn one of them on, or turn this off.
+            </span>
+          )}
+        </span>
+      </label>
       <label className="flex items-center gap-2 text-sm">
         <Switch checked={step.requiresApproval} onCheckedChange={(checked) => onChange({ ...step, requiresApproval: checked })} disabled={pending} />
         Requires human approval
@@ -999,6 +1021,16 @@ function StepEditor({
           )}
         </div>
       )}
+
+      <label className="flex items-start gap-2 text-sm">
+        <Switch checked={step.requiresHtmlOutput} onCheckedChange={(checked) => onChange({ ...step, requiresHtmlOutput: checked })} disabled={pending} className="mt-0.5" />
+        <span>
+          Require an HTML mockup to complete
+          <span className="block text-xs text-muted-foreground">
+            The step can only finish with at least one complete HTML page in its outputs; it can still be skipped. Applies to runs started after you save.
+          </span>
+        </span>
+      </label>
 
       <div className="grid gap-1.5">
         <Label htmlFor={`${idPrefix}-quick-look`}>Quick look</Label>

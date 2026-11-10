@@ -207,6 +207,8 @@ export interface PlanItemData {
   dependsOn?: string[];
   /** Present while the task waits for its parents to be merged; it stays in Planning meanwhile. */
   waiting?: WaitingData;
+  /** "UI planning waits for parent" (`PlanItemRecord.uiPlanningWaitsForParent`): on, nothing runs until the parents are merged; absent reads as off. */
+  uiPlanningWaitsForParent?: boolean;
   /** Hidden from every Tasks-board column (Completed included). */
   archived?: boolean;
   createdAt: string;

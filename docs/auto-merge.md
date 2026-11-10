@@ -112,7 +112,7 @@ When a task's state becomes Merged while its switch is on, an info notification 
 ## API
 
 - `PUT /api/projects/:id/plan-items/:itemId/auto-merge` with `{ "enabled": boolean }` returns the task. 400 for a malformed body, 404 for an unknown task or one of another project, 409 when the task cannot have a PR.
-- `POST /api/plan-items/:id/execute` and `POST /api/projects/:id/plan-items/:itemId/start-when-ready` accept an optional boolean `autoMerge` (the Start task dialog's switch). It is saved only when the start is accepted; absent leaves it unchanged, a non-boolean is 400, and `true` with `createBranch: false` or without a linked repository is 409 with the reason above.
+- `POST /api/plan-items/:id/execute` and `POST /api/projects/:id/plan-items/:itemId/start-when-ready` accept an optional boolean `autoMerge` (the Start task dialog's switch, or a row's Auto-merge in Start pending tasks). It is saved only when the start is accepted; absent leaves it unchanged, a non-boolean is 400, and `true` with `createBranch: false` or without a linked repository is 409 with the reason above.
 - `POST /api/projects/:id/plan-items/:itemId/auto-merge/retry` returns the task. 409 unless the state is failed or agent unavailable.
 
 ## Not covered

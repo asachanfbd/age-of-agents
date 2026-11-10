@@ -557,7 +557,7 @@ test('W46 W48 the person\'s pick is held by the open dialog, and Start sends the
   // The initial id only seeds the state, so a live update that changes the preselection never overwrites a pick.
   assert.match(dialogs, /const \[workflowId, setWorkflowId\] = useState\(initialWorkflowId\);/);
   assert.doesNotMatch(dialogs, /useEffect\([^)]*initialWorkflowId/);
-  assert.match(dialogs, /await onStart\(startOptions\(\{ executorId, createBranch, hasRepository, autoMerge, workflowId, skippedStepIds: skipped \}\)\);/);
+  assert.match(dialogs, /await onStart\(\{ \.\.\.startOptions\(\{ executorId, createBranch, hasRepository, autoMerge, workflowId, skippedStepIds: skipped \}\), \.\.\.waits \}\);/);
 });
 
 test('W47 "Needs more info" shows the warning line; nothing else does', () => {
@@ -925,7 +925,7 @@ test('C6 the expander is its own button with aria-expanded, apart from the card'
 test('C7 the Start dialog renders the warning and fallback lines from the helpers, and Start ignores Info status', () => {
   assert.match(panel, /return \{ initialWorkflowId: choice\.workflowId, fallbackNote: choice\.fallbackNote, infoWarning: startInfoWarning\(item\) \};/);
   assert.match(panel, /startWorkflowChoice\(\{ bug: !!item && isBugItem\(item\), \.\.\.workflowDefaults \}\)/);
-  assert.match(panel, /const workflowDefaults = \{ projectDefaultId: initialStartWorkflowId\(project, workflows\),/);
+  assert.match(panel, /const workflowDefaults = \{\s+projectDefaultId: initialStartWorkflowId\(project, workflows\),/);
   assert.match(dialogs, /\{infoWarning && <p role="status"[^>]*>\{infoWarning\}<\/p>\}/);
   assert.match(dialogs, /\{fallbackNote && <p [^>]*>\{fallbackNote\}<\/p>\}/);
   assert.match(dialogs, /disabled=\{!executorId \|\| needsWorkflow \|\| noStepSelected \|\| starting\} onClick=\{\(\) => void start\(\)\}>Start<\/Button>/);

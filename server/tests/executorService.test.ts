@@ -20,7 +20,8 @@ test('getExecutor finds by id and returns undefined for an unknown one', async (
   assert.equal(await executorService.getExecutor('does-not-exist'), undefined);
 });
 
-test('getDefaultExecutor returns the first configured entry', async () => {
-  const [first] = await executorService.listExecutors();
-  assert.deepEqual(await executorService.getDefaultExecutor(), first);
+test('isInteractiveCli accepts the CLI kinds and rejects anything else', () => {
+  assert.equal(executorService.isInteractiveCli({ id: 'a', label: 'A', kind: 'claude-cli', bin: 'claude' }), true);
+  assert.equal(executorService.isInteractiveCli({ id: 'b', label: 'B', kind: 'codex-cli', bin: 'codex' }), true);
+  assert.equal(executorService.isInteractiveCli({ id: 'c', label: 'C', kind: 'claude-sdk' as never, bin: 'x' }), false);
 });

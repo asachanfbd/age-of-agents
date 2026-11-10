@@ -980,7 +980,7 @@ export function installServerStub() {
 
     // Mirrors the dependency routes in server/src/api/router.ts and projects/dependencyService.ts. A parent counts as
     // satisfied here when its status is 'done' (the daemon reads git); everything else waits.
-    const dependenciesMatch = pathname.match(/^\/api\/projects\/([^/]+)\/plan-items\/([^/]+)\/(dependencies|start-when-ready|cancel-waiting)$/);
+    const dependenciesMatch = pathname.match(/^\/api\/projects\/([^/]+)\/plan-items\/([^/]+)\/(dependencies|start-when-ready|cancel-waiting|ui-planning-waits)$/);
     if (dependenciesMatch) {
       const [, projectId, itemId, action] = dependenciesMatch;
       const item = planItems.get(itemId);
@@ -1015,6 +1015,13 @@ export function installServerStub() {
         const reasons = unsatisfied.map((id) => ({ parentId: id, text: 'Waiting for ' + planItems.get(id)?.title + ' to finish', blocked: false }));
         item.waiting = { options: body ?? {}, state: 'waiting', reasons, since: new Date().toISOString(), longWaitNotified: false, updatedAt: new Date().toISOString() };
         return respond({ started: false, item }, 202);
+      }
+      if (method === 'PUT' && action === 'ui-planning-waits') {
+        if (typeof body?.uiPlanningWaitsForParent !== 'boolean') return respond({ error: 'uiPlanningWaitsForParent must be true or false.' }, 400);
+        if (!(item.dependsOn ?? []).length) return respond({ error: 'This task has no parent tasks, so the setting does not apply.' }, 409);
+        if (item.workflowRunId) return respond({ error: 'UI Planning has already started, so this can\'t change now.' }, 409);
+        item.uiPlanningWaitsForParent = body.uiPlanningWaitsForParent;
+        return respond(item);
       }
       if (method === 'POST' && action === 'cancel-waiting') {
         if (!item.waiting) return respond({ error: 'This task is not waiting for its parents.' }, 409);

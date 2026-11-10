@@ -256,6 +256,7 @@ export type RunStatusVariant = 'secondary' | 'success' | 'warning' | 'soft-destr
 const RUN_STATUS_PRESENTATION: Record<WorkflowRunStatus, { label: string; variant: RunStatusVariant }> = {
   starting: { label: 'Starting', variant: 'secondary' },
   running: { label: 'Running', variant: 'success' },
+  held: { label: 'Waiting', variant: 'secondary' },
   'awaiting-approval': { label: 'Awaiting approval', variant: 'warning' },
   'needs-attention': { label: 'Needs attention', variant: 'warning' },
   completing: { label: 'Completing', variant: 'success' },

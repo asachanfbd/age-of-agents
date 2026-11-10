@@ -172,3 +172,66 @@ test('I31 chain: 400 for a bad session or autoMerge, 200 with the chained group'
   assert.deepEqual((byId.get(second.id) as PlanItemRecord).dependsOn, [first.id]);
   assert.equal((byId.get(first.id) as PlanItemRecord).dependsOn, undefined);
 });
+
+// ---- Task 38.002: "UI planning waits for parent" ----
+
+const putWaits = (target: ProjectRecord, id: string, body: unknown) =>
+  call(itemPath(target, id, 'ui-planning-waits'), { method: 'PUT', body: typeof body === 'string' ? body : JSON.stringify(body) });
+
+test('38.002 I20 PUT ui-planning-waits: 400 for a non-boolean, 404 out of project, 409 when it cannot change, 200 and idempotent', async () => {
+  const parent = await task(project, { status: 'developing' });
+  const child = await task(project, { dependsOn: [parent.id] });
+  for (const body of [{ uiPlanningWaitsForParent: null }, { uiPlanningWaitsForParent: 'true' }, { uiPlanningWaitsForParent: 1 }, {}]) {
+    const res = await putWaits(project, child.id, body);
+    assert.equal(res.status, 400, JSON.stringify(body));
+    assert.match(res.body.error, /uiPlanningWaitsForParent/);
+  }
+  assert.equal((await putWaits(project, 'missing', { uiPlanningWaitsForParent: true })).status, 404);
+  const other = await h.createProject('Dependency API waits other');
+  assert.equal((await putWaits(other, child.id, { uiPlanningWaitsForParent: true })).status, 404);
+
+  const now = new Date().toISOString();
+  const earlyRun = await h.collections.workflowRunsDb.insert({
+    id: randomUUID(), projectId: project.id, planItemId: 'x', workflowId: 'software-development',
+    workflowSnapshot: { id: 'software-development', name: 'Software development', description: '', enabled: true, steps: [] },
+    status: 'running', currentStepId: 'ui-planning', executorId: 'test-claude-cli', prUrl: null, completionReport: null, attentionReason: null,
+    loopRoundAllowance: 0, early: { stepId: 'ui-planning', revisions: 0 }, createdAt: now, updatedAt: now, completedAt: null,
+  });
+  const waiting = { options: {}, state: 'waiting' as const, reasons: [], since: now, longWaitNotified: false, updatedAt: now };
+  const refusals: [Partial<PlanItemRecord>, RegExp][] = [
+    [{ dependsOn: [parent.id], status: 'developing', workflowRunId: earlyRun.id, waiting }, /UI Planning has already started/],
+    [{}, /no parent tasks/],
+    [{ dependsOn: [parent.id], archived: true }, /archived or finished/],
+    [{ dependsOn: [parent.id], status: 'developing', workflowRunId: 'normal-run' }, /already started/],
+  ];
+  for (const [extra, message] of refusals) {
+    const res = await putWaits(project, (await task(project, extra)).id, { uiPlanningWaitsForParent: true });
+    assert.equal(res.status, 409, String(message));
+    assert.match(res.body.error, message);
+  }
+
+  const saved = await putWaits(project, child.id, { uiPlanningWaitsForParent: true });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.uiPlanningWaitsForParent, true);
+  const again = await putWaits(project, child.id, { uiPlanningWaitsForParent: true });
+  assert.equal(again.status, 200);
+  assert.equal(again.body.updatedAt, saved.body.updatedAt, 'the same value writes nothing');
+});
+
+test('38.002 I21 start-when-ready: a non-boolean flag is a 400; the flag is saved only when the start is accepted', async () => {
+  const parent = await task(project, { status: 'developing' });
+  const child = await task(project, { dependsOn: [parent.id] });
+  const bad = await call(itemPath(project, child.id, 'start-when-ready'), { method: 'POST', body: JSON.stringify({ uiPlanningWaitsForParent: 'yes' }) });
+  assert.equal(bad.status, 400);
+  assert.match(bad.body.error, /uiPlanningWaitsForParent/);
+  const accepted = await call(itemPath(project, child.id, 'start-when-ready'), { method: 'POST', body: JSON.stringify({ uiPlanningWaitsForParent: true }) });
+  assert.equal(accepted.status, 202);
+  assert.equal(accepted.body.item.uiPlanningWaitsForParent, true);
+
+  const bare = await h.projectService.createProject({ name: 'Dependency API waits bare', position: null });
+  const bareParent = await task(bare);
+  const bareChild = await task(bare, { dependsOn: [bareParent.id] });
+  const refused = await call(itemPath(bare, bareChild.id, 'start-when-ready'), { method: 'POST', body: JSON.stringify({ uiPlanningWaitsForParent: true }) });
+  assert.equal(refused.status, 409);
+  assert.equal((await h.collections.planItemsDb.get(bareChild.id))!.uiPlanningWaitsForParent, undefined, 'a refused start saves nothing');
+});

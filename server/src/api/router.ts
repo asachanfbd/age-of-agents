@@ -104,7 +104,7 @@ import { PLAN_DOC_KEYS, PLAN_DOC_TITLES, InvalidPlanDocKeyError, readAllPlanDocs
 import { listProjectDocuments, readPlanDocumentRaw, UnknownPlanDocumentError } from '../projects/documents.ts';
 import { listProjectTree, readFileSafely, NotAFileError, PathTraversalError } from '../projects/fileTree.ts';
 import { loadTestingConfig } from '../testing/config.ts';
-import type { PlanningTaskDraft } from '../projects/plan.ts';
+import type { PlanningTaskDraft, PlanningTaskPatch } from '../projects/plan.ts';
 import { mountAgentSessionRoutes } from './agentSessionRoutes.ts';
 import { defaultExtractionDeps } from '../content/defaultExtractionDeps.ts';
 import type { ExtractionDeps } from '../content/extractions.ts';
@@ -197,6 +197,8 @@ import {
   stepCanEditCode,
 } from '../worker/workerManager.ts';
 import type { PlanningQueueEntryRef } from '../worker/workerManager.ts';
+import { StepOutputRequiredError } from '../worker/requiredOutputs.ts';
+import { parseStepOutputs } from './stepOutputs.ts';
 import { BugGroupConflictError, TaskNotBugFilingSessionError, TaskNotBugReportSessionError } from '../worker/bugTracker.ts';
 import {
   BUG_LIMITS, BugIntroducerNotStartedError, BugNotCompletedError, RegressionNotBugError, BugNotPlanningTaskError, BugStartedError, BugValidationError,
@@ -222,7 +224,7 @@ import type { AutoMergeService } from '../projects/autoMergeService.ts';
 import { autoMergeIneligibleReason, parseAutoMergeToggle } from '../projects/autoMerge.ts';
 import { dependencies as defaultDependencies } from '../projects/dependencyInstance.ts';
 import type { DependencyService } from '../projects/dependencyService.ts';
-import { DependencyConflictError, DependencyInvalidError } from '../projects/dependencies.ts';
+import { DependencyConflictError, DependencyInvalidError, parseUiPlanningWaits } from '../projects/dependencies.ts';
 import { GitProviderError, NoLinkedRepositoryError, pullRequestContext } from '../projects/pullRequestActions.ts';
 import { PullRequestHeadGoneError, PullRequestNotFoundError } from '../projects/pullRequestMerge.ts';
 import {
@@ -1316,9 +1318,13 @@ export function createApiRouter({
   // Start on a dependent task. Body: the same start options as /plan-items/:id/execute.
   // 201 { started: true, run } when every parent is satisfied now; 202 { started: false, item } when the task waits for them,
   // or 202 { started: false, entry, item } when they are satisfied but the Project is at its task limit (the task joins the waiting list).
+  // Optional uiPlanningWaitsForParent (boolean) is saved on the task only when the start is accepted.
   router.post('/projects/:id/plan-items/:itemId/start-when-ready', route(async (req, res) => {
-    const { executorId, workflowId, createBranch, skippedStepIds, autoMerge: withAutoMerge } = (req.body ?? {}) as { executorId?: unknown; workflowId?: unknown; createBranch?: unknown; skippedStepIds?: unknown; autoMerge?: unknown };
-    const error = await startOptionsError({ executorId, workflowId, createBranch, skippedStepIds, autoMerge: withAutoMerge });
+    const { executorId, workflowId, createBranch, skippedStepIds, autoMerge: withAutoMerge, uiPlanningWaitsForParent } = (req.body ?? {}) as {
+      executorId?: unknown; workflowId?: unknown; createBranch?: unknown; skippedStepIds?: unknown; autoMerge?: unknown; uiPlanningWaitsForParent?: unknown;
+    };
+    const error = await startOptionsError({ executorId, workflowId, createBranch, skippedStepIds, autoMerge: withAutoMerge })
+      ?? (uiPlanningWaitsForParent !== undefined && parseUiPlanningWaits(uiPlanningWaitsForParent) === null ? 'uiPlanningWaitsForParent must be true or false' : null);
     if (error) { res.status(400).json({ error }); return; }
     await assertAutoMergeAllowed(param(req, 'id'), withAutoMerge as boolean | undefined, createBranch as boolean | undefined);
     const result = await dependencies.startWhenReady(param(req, 'id'), param(req, 'itemId'), {
@@ -1326,10 +1332,16 @@ export function createApiRouter({
       ...(workflowId !== undefined ? { workflowId: workflowId as string } : {}),
       ...(createBranch !== undefined ? { createBranch: createBranch as boolean } : {}),
       ...(skippedStepIds !== undefined ? { skippedStepIds: skippedStepIds as string[] } : {}),
-    });
+    }, uiPlanningWaitsForParent as boolean | undefined);
     // Saved only now that the start was accepted (started, or waiting for its parents).
     await applyStartAutoMerge(param(req, 'id'), param(req, 'itemId'), withAutoMerge as boolean | undefined);
     res.status(result.started ? 201 : 202).json(result.started ? result : { ...result, item: await getPlanItem(param(req, 'itemId')) });
+  }));
+
+  // "UI planning waits for parent". Body { uiPlanningWaitsForParent: boolean }; 400 for anything else, 409 once UI Planning
+  // has started, for a task with no parents, or one archived, merged or started normally. 200 with the task.
+  router.put('/projects/:id/plan-items/:itemId/ui-planning-waits', route(async (req, res) => {
+    res.json(await dependencies.setUiPlanningWaits(param(req, 'id'), param(req, 'itemId'), (req.body as { uiPlanningWaitsForParent?: unknown } | undefined)?.uiPlanningWaitsForParent));
   }));
 
   router.post('/projects/:id/plan-items/:itemId/cancel-waiting', route(async (req, res) => {
@@ -1589,9 +1601,11 @@ export function createApiRouter({
     if (typeof summary !== 'string' || !summary.trim()) { res.status(400).json({ error: 'summary is required' }); return; }
     if (verdict !== undefined && verdict !== 'pass' && verdict !== 'issues') { res.status(400).json({ error: 'verdict must be "pass" or "issues"' }); return; }
     if (planningGap !== undefined && planningGap !== null && typeof planningGap !== 'string') { res.status(400).json({ error: 'planningGap must be a string' }); return; }
+    const parsedOutputs = parseStepOutputs(outputs);
+    if ('error' in parsedOutputs) { res.status(400).json({ error: parsedOutputs.error }); return; }
     res.status(201).json(await workerManager.completeStep(taskId, {
       summary: summary.trim(),
-      outputs: Array.isArray(outputs) ? outputs : undefined,
+      outputs: parsedOutputs.outputs,
       verdict: verdict as 'pass' | 'issues' | undefined,
       planningGap: planningGap ?? undefined,
     }));
@@ -1970,14 +1984,14 @@ export function createApiRouter({
       return {
         list: () => workerManager.listPlanningTasks(sessionOrTaskId),
         create: (draft: PlanningTaskDraft) => workerManager.createPlanningTask(sessionOrTaskId, draft),
-        update: (itemId: string, patch: Partial<PlanningTaskDraft>) => workerManager.updatePlanningTask(sessionOrTaskId, itemId, patch),
+        update: (itemId: string, patch: PlanningTaskPatch) => workerManager.updatePlanningTask(sessionOrTaskId, itemId, patch),
         remove: (itemId: string) => workerManager.deletePlanningTask(sessionOrTaskId, itemId),
       };
     }
     return {
       list: () => listPlanItems(agentProjectId),
       create: (draft: PlanningTaskDraft) => workerManager.createProjectTask(agentProjectId, draft),
-      update: (itemId: string, patch: Partial<PlanningTaskDraft>) => workerManager.updateProjectTask(agentProjectId, itemId, patch),
+      update: (itemId: string, patch: PlanningTaskPatch) => workerManager.updateProjectTask(agentProjectId, itemId, patch),
       remove: (itemId: string) => workerManager.deleteProjectTask(agentProjectId, itemId),
     };
   }
@@ -2001,16 +2015,18 @@ export function createApiRouter({
   router.patch('/agent-tasks/:itemId', route(async (req, res) => {
     const taskId = planningTaskId(req, res);
     if (!taskId) return;
-    const { title, description } = req.body as { title?: unknown; description?: unknown };
+    const { title, description, uiPlanningWaitsForParent } = req.body as { title?: unknown; description?: unknown; uiPlanningWaitsForParent?: unknown };
     const titleOk = title === undefined || (typeof title === 'string' && !!title.trim());
     const descriptionOk = description === undefined || typeof description === 'string';
-    if (!titleOk || !descriptionOk || (title === undefined && description === undefined)) {
-      res.status(400).json({ error: 'give a non-empty title and/or a description to change' });
+    const waitsOk = uiPlanningWaitsForParent === undefined || parseUiPlanningWaits(uiPlanningWaitsForParent) !== null;
+    if (!titleOk || !descriptionOk || !waitsOk || (title === undefined && description === undefined && uiPlanningWaitsForParent === undefined)) {
+      res.status(400).json({ error: 'give a non-empty title, a description and/or uiPlanningWaitsForParent (true or false) to change' });
       return;
     }
     res.json(await (await taskTools(taskId)).update(param(req, 'itemId'), {
       ...(typeof title === 'string' ? { title: title.trim() } : {}),
       ...(typeof description === 'string' ? { description: description.trim() } : {}),
+      ...(typeof uiPlanningWaitsForParent === 'boolean' ? { uiPlanningWaitsForParent } : {}),
     }));
   }));
 
@@ -2050,8 +2066,14 @@ export function createApiRouter({
   router.put('/agent-bugs/:itemId/dependencies', route(async (req, res) => {
     const taskId = planningTaskId(req, res);
     if (!taskId) return;
-    const { projectId, dependsOn } = await workerManager.checkedSessionDependencies(taskId, param(req, 'itemId'), (req.body as { dependsOn?: unknown } | undefined)?.dependsOn);
-    res.json(await dependencies.setDependencies(projectId, param(req, 'itemId'), dependsOn, { requireEligibleParents: true }));
+    const body = (req.body ?? {}) as { dependsOn?: unknown; uiPlanningWaitsForParent?: unknown };
+    // Optional "UI planning waits for parent", saved with the parents in one write; omitted keeps the stored value.
+    if (body.uiPlanningWaitsForParent !== undefined && parseUiPlanningWaits(body.uiPlanningWaitsForParent) === null) {
+      res.status(400).json({ error: 'uiPlanningWaitsForParent must be true or false' });
+      return;
+    }
+    const { projectId, dependsOn } = await workerManager.checkedSessionDependencies(taskId, param(req, 'itemId'), body.dependsOn);
+    res.json(await dependencies.setDependencies(projectId, param(req, 'itemId'), dependsOn, { requireEligibleParents: true, uiPlanningWaitsForParent: body.uiPlanningWaitsForParent }));
   }));
 
   // A report session reopens a completed bug of its Project as round 2 and starts it at once.
@@ -2310,6 +2332,7 @@ const STATUS_BY_ERROR = new Map<Function, number>([
   [TaskNotWorkflowStepError, 401],
   [TestingSetupApprovalError, 409],
   [TestingSetupStepRefusedError, 422],
+  [StepOutputRequiredError, 422],
   [TestRunNotFoundError, 404],
   [TestActionNotFoundError, 404],
   [TestRunTaskError, 404],

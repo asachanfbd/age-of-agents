@@ -1,4 +1,4 @@
-import type { DependencyAction, DependencyReason, PlanItemRecord } from '../domain/types.ts';
+import type { DependencyAction, DependencyReason, DependentStartOptions, PlanItemRecord, WorkflowRecord } from '../domain/types.ts';
 import { comparePlanningGroupOrder } from './planItemService.ts';
 
 /** The most parents one task can wait for, and the longest chain of dependent tasks the daemon accepts. */
@@ -23,6 +23,11 @@ export function parseDependsOn(value: unknown): string[] | null {
   if (!Array.isArray(value) || value.length > MAX_PARENTS) return null;
   if (!value.every((id) => typeof id === 'string' && id.trim())) return null;
   return [...new Set(value.map((id: string) => id.trim()))];
+}
+
+/** Parses the "UI planning waits for parent" body value: a boolean only, else null. */
+export function parseUiPlanningWaits(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null;
 }
 
 /** Parents of an item; absent on records stored before dependencies existed. */
@@ -110,9 +115,54 @@ export function isEligibleParent(item: PlanItemRecord): boolean {
   return item.status === 'done' && !merged;
 }
 
+// ---- Early UI Planning ----
+
+/** The one step a waiting task may run before its parents are merged. */
+export const EARLY_STEP_ID = 'ui-planning';
+
+/**
+ * The workflow's early step: its first step when that is the read-only, manual-approval UI Planning
+ * step (`ui-planning`). Null for any other workflow — a renamed or reordered step does not qualify.
+ */
+export function earlyStepOf(workflow: Pick<WorkflowRecord, 'steps'>): string | null {
+  const first = workflow.steps[0];
+  return first && first.id === EARLY_STEP_ID && first.requiresApproval && !first.canEditCode ? first.id : null;
+}
+
+/**
+ * Whether a waiting task runs its UI Planning early: the setting is off, it has parents, the start
+ * makes its own branch (an in-place start never runs early), the step is not left out, the project
+ * has a repository, and `earlyStepId` (from the workflow the start would run) exists.
+ */
+export function wantsEarlyRun(input: {
+  item: Pick<PlanItemRecord, 'uiPlanningWaitsForParent' | 'dependsOn' | 'testingSetup' | 'prConflict'>;
+  options: DependentStartOptions;
+  hasRepository: boolean;
+  earlyStepId: string | null;
+}): boolean {
+  const { item, options, earlyStepId } = input;
+  if (item.uiPlanningWaitsForParent === true || parentsOf(item).length === 0 || !input.hasRepository) return false;
+  if (item.testingSetup || item.prConflict || options.createBranch === false || !earlyStepId) return false;
+  return !(options.skippedStepIds ?? []).includes(earlyStepId);
+}
+
+/**
+ * Why the "UI planning waits for parent" setting cannot change now; null when it can. It applies to a
+ * task with parents that is ready, or waiting with no early run yet. `hasEarlyRun` is whether the
+ * task's run is an early run.
+ */
+export function uiPlanningWaitsLockedReason(item: PlanItemRecord, hasEarlyRun: boolean): string | null {
+  if (parentsOf(item).length === 0) return 'This task has no parent tasks, so the setting does not apply.';
+  const merged = item.autoMerge?.state === 'merged' || item.pullRequest?.state === 'merged';
+  if (item.archived || merged || item.prConflict || item.testingSetup) return 'This task is archived or finished, so the setting cannot change.';
+  if (hasEarlyRun) return 'UI Planning has already started, so this can\'t change now.';
+  if (!isReadyForDependencies(item)) return 'This task has already started, so the setting cannot change.';
+  return null;
+}
+
 // ---- The satisfaction rule ----
 
-export type ParentRunStatus = 'starting' | 'running' | 'awaiting-approval' | 'needs-attention' | 'completing' | 'completed' | 'failed' | 'stopped';
+export type ParentRunStatus = 'starting' | 'running' | 'held' | 'awaiting-approval' | 'needs-attention' | 'completing' | 'completed' | 'failed' | 'stopped';
 
 /** What is known about one parent right now. Git facts are read by the service; this function only decides. */
 export interface ParentFacts {

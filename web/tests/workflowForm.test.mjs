@@ -594,3 +594,63 @@ test('the picker renders Always load only for ticked skills and "(no description
   assert.match(modal, /\(no description\)/);
   assert.match(readFileSync(new URL('../src/lib/serverApi.ts', import.meta.url), 'utf8'), /preloadSkillIds\?: string\[\]/);
 });
+
+test('canUseBrowser defaults off, reads absent as off and round-trips', async () => {
+  const { emptyStep, stepFromRecord, toWorkflowStep } = await import('../src/lib/workflowForm.ts');
+  assert.equal(emptyStep().canUseBrowser, false);
+  const base = { id: 'rev', name: 'Review', agentId: 'a', skillIds: [], instructions: 'x', canEditCode: false, canRunCommands: true, requiresApproval: false };
+  assert.equal(stepFromRecord(base).canUseBrowser, false);
+  const on = stepFromRecord({ ...base, canUseBrowser: true });
+  assert.equal(on.canUseBrowser, true);
+  assert.equal(toWorkflowStep(on).canUseBrowser, true);
+  assert.equal(toWorkflowStep({ ...on, canUseBrowser: false }).canUseBrowser, false);
+});
+
+test('browser eligibility needs a shell and never flips the switch on its own', async () => {
+  const { stepHasShell, browserLacksShell } = await import('../src/lib/workflowForm.ts');
+  assert.equal(stepHasShell({ canEditCode: true, canRunCommands: false }), true);
+  assert.equal(stepHasShell({ canEditCode: false, canRunCommands: true }), true);
+  assert.equal(stepHasShell({ canEditCode: false, canRunCommands: false }), false);
+  assert.equal(browserLacksShell({ canEditCode: false, canRunCommands: false, canUseBrowser: true }), true);
+  assert.equal(browserLacksShell({ canEditCode: true, canRunCommands: false, canUseBrowser: true }), false);
+  assert.equal(browserLacksShell({ canEditCode: false, canRunCommands: false, canUseBrowser: false }), false);
+});
+
+test('the editor shows the Can use browser switch states and the Settings row the Uses browser badge', async () => {
+  const { readFileSync } = await import('node:fs');
+  const modal = readFileSync(new URL('../src/ui/CatalogModal.tsx', import.meta.url), 'utf8');
+  assert.ok(modal.includes('The step gets a headless browser it can drive to check the running app, for example opening pages, clicking through and taking screenshots. It needs a shell to start the app, so it also needs Can edit code or Can run commands.'));
+  assert.ok(modal.includes("${!step.canUseBrowser && !stepHasShell(step) ? ' opacity-60' : ''}"), 'dimmed only when off and ineligible (state B), not in state C');
+  assert.ok(modal.includes('Turn on Can edit code or Can run commands first.'));
+  assert.match(modal, /role="alert"[^]*Error: Can use browser needs Can edit code or Can run commands\. Turn one of them on, or turn this off\./);
+  assert.match(modal, /disabled=\{pending \|\| \(!step\.canUseBrowser && !stepHasShell\(step\)\)\}/);
+  assert.ok(modal.indexOf('Can run commands') < modal.indexOf('Can use browser'));
+  assert.ok(modal.indexOf('Can use browser') < modal.indexOf('Requires human approval'));
+  const settings = readFileSync(new URL('../src/ui/project-popup/SettingsPanel.tsx', import.meta.url), 'utf8');
+  assert.match(settings, /Runs commands<\/Badge>\}\s*\{step\.canUseBrowser && <Badge variant="outline">Uses browser<\/Badge>\}\s*\{step\.requiresApproval/);
+  assert.ok(settings.includes('flex flex-wrap items-center gap-1.5'));
+  const api = readFileSync(new URL('../src/lib/serverApi.ts', import.meta.url), 'utf8');
+  assert.match(api, /canUseBrowser\?: boolean/);
+});
+
+// ---- Required HTML mockup (B.036) ----
+
+test('B036 a new step does not require an HTML mockup, and a record without the field reads as off', () => {
+  assert.equal(emptyStep().requiresHtmlOutput, false);
+  assert.equal(stepFromRecord(stepRecord()).requiresHtmlOutput, false);
+  assert.equal(stepFromRecord(stepRecord({ requiredOutputFormat: null })).requiresHtmlOutput, false);
+  assert.equal('requiredOutputFormat' in toWorkflowStep(stepFromRecord(stepRecord())), false, 'a step without it does not gain the key');
+});
+
+test('B036 requiredOutputFormat "html" survives an editor round-trip, so saving never turns the guard off', () => {
+  const fields = stepFromRecord(stepRecord({ requiredOutputFormat: 'html' }));
+  assert.equal(fields.requiresHtmlOutput, true);
+  assert.equal(toWorkflowStep(fields).requiredOutputFormat, 'html');
+  assert.equal('requiredOutputFormat' in toWorkflowStep({ ...fields, requiresHtmlOutput: false }), false);
+});
+
+test('B036 the step editor shows the Require an HTML mockup switch bound to requiresHtmlOutput', () => {
+  const modal = readFileSync(new URL('../src/ui/CatalogModal.tsx', import.meta.url), 'utf8');
+  assert.match(modal, /Require an HTML mockup to complete/);
+  assert.match(modal, /checked=\{step\.requiresHtmlOutput\} onCheckedChange=\{\(checked\) => onChange\(\{ \.\.\.step, requiresHtmlOutput: checked \}\)\}/);
+});

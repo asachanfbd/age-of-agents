@@ -1,4 +1,4 @@
-import type { BugRegression, StepRunApproval, WorkflowRecord } from '../domain/types.ts';
+import type { BugRegression, RequiredOutputFormat, StepRunApproval, WorkflowRecord } from '../domain/types.ts';
 import { appendStepNote } from '../projects/stepNotes.ts';
 import { regressionReporterLabel } from '../projects/bugs.ts';
 import { APPROVAL_BRIEF_STYLE, REVIEW_SUMMARY_STYLE, SUMMARY_HOUSE_STYLE, SUMMARY_HOUSE_STYLE_REMINDER } from './summaryStyle.ts';
@@ -42,6 +42,9 @@ export interface PlanningGapNote {
   note: string;
 }
 
+/** Agents read "cannot create any file" as "cannot send a mockup", so read-only Permissions text says outright that outputs are not files. */
+const OUTPUTS_ARE_NOT_FILES = 'The read-only rule covers project and working-tree files only: `complete_step` outputs, including HTML mockups passed inline as `outputs[].content`, are not files and are always allowed.';
+
 export interface BuildStepPromptInput {
   taskTitle: string;
   taskDescription: string;
@@ -50,8 +53,12 @@ export interface BuildStepPromptInput {
   canEditCode: boolean;
   /** A read-only step that may run commands (see WorkflowStep.canRunCommands); ignored when `canEditCode` is true. */
   canRunCommands?: boolean;
+  /** Set for a step with `canUseBrowser`: whether the headless browser server is registered for this session. Omitted renders no Browser section. */
+  browser?: 'available' | 'unavailable';
   /** Required only when this step is a loop origin (`WorkflowStep.loopBack` set) — tells the step it must call `complete_step` with a `verdict`. */
   requiresVerdict: boolean;
+  /** The output format `complete_step` refuses to finish without (see WorkflowStep.requiredOutputFormat); absent or null adds no finish line. */
+  requiredOutputFormat?: RequiredOutputFormat | null;
   /** True for a step that pauses for a human approval — its summary is then framed as the reviewer's brief. Defaults to false. */
   requiresApproval?: boolean;
   branch?: string;
@@ -107,6 +114,24 @@ function formatStage(stage: StagePromptHistory): string {
   return `## ${stage.stageName}\n\n${body}`;
 }
 
+const BROWSER_UNAVAILABLE_SECTION = `# Browser
+
+The headless browser is NOT available in this session (its package or browser binary is not installed on the server). Do not try to install it. Report every browser check as "unverified: browser unavailable" in your summary; never claim a screen or behaviour as verified in a browser.`;
+
+const BROWSER_SECTION = `# Browser
+
+This step has a headless browser (the \`browser_*\` tools: \`browser_navigate\`, \`browser_snapshot\`, \`browser_click\`, \`browser_type\`, \`browser_take_screenshot\`, \`browser_resize\` and others). Use it to check the running app, not only the diff. If the project has no UI, skip the browser checks and say so in one line.
+
+**Start the app.** Find the project's run command in \`.docs/\` or its saved Commands. Run it in the background on a free port, and wait until the URL responds before you open it. Stop it before you call \`complete_step\`; a server left running outlives this session.
+
+**Drive the browser.** Navigate to each screen, click through the flows, and take screenshots. Prefer \`browser_snapshot\` to read the page structure.
+
+**What to check.** Every screen or state the UI Planning mockups and the task specification describe, including empty, error and loading states. When the UI Planning summary names breakpoints, also check a narrow (mobile) width with \`browser_resize\`.
+
+**How to report.** List in your summary what you checked in the browser and what you saw. A behaviour or screen that is missing or differs from the plan is an issue.
+
+**If the app cannot be started** (no run command documented, a missing service or credentials), say so and mark the browser checks "unverified". Never claim them as passed.`;
+
 /** The full prompt for one step Task, including everything earlier stages produced — see BuildStepPromptInput. */
 export function buildStepPrompt(input: BuildStepPromptInput): string {
   const sections: string[] = [];
@@ -130,14 +155,19 @@ export function buildStepPrompt(input: BuildStepPromptInput): string {
     input.canEditCode
       ? '# Permissions\n\nThis step may edit code and run commands normally.'
       : input.canRunCommands
-        ? '# Permissions\n\nThis step is READ-ONLY: it cannot edit, create, or delete any project file. It MAY run commands for installing dependencies, reproducing problems and running tests. Files created or changed by those commands are not committed by this step, and you must not use commands to edit source files. Produce your output as this step\'s summary/outputs, not as file changes.'
-        : '# Permissions\n\nThis step is READ-ONLY: it cannot edit, create, or delete any file, or run commands that change the working tree. Produce your output as this step\'s summary/outputs, not as file changes.',
+        ? '# Permissions\n\nThis step is READ-ONLY: it cannot edit, create, or delete any project file. It MAY run commands for installing dependencies, reproducing problems and running tests. Files created or changed by those commands are not committed by this step, and you must not use commands to edit source files. Produce your output as this step\'s summary/outputs, not as file changes. ' + OUTPUTS_ARE_NOT_FILES
+        : '# Permissions\n\nThis step is READ-ONLY: it cannot edit, create, or delete any file, or run commands that change the working tree. Produce your output as this step\'s summary/outputs, not as file changes. ' + OUTPUTS_ARE_NOT_FILES,
   );
+
+  if (input.browser) sections.push(input.browser === 'available' ? BROWSER_SECTION : BROWSER_UNAVAILABLE_SECTION);
 
   const finishLines = [
     '# How to finish',
     'Call the `complete_step` tool with a `summary` (and `outputs`, if this step produces any) once you are done.',
   ];
+  if (input.requiredOutputFormat === 'html') {
+    finishLines.push('This step must include at least one complete HTML mockup in `outputs` (format "html"); `complete_step` will refuse the call without one.');
+  }
   finishLines.push(
     'At the start of this step, call `report_progress` with a short checklist of your planned work (a very short step can post a minimal one), giving each item a 1-2 word `short` label (e.g. "writing code") — update it whenever an item starts or finishes or the plan changes, keep its `currentActivity` line current, and give a time estimate when you can. This is for the person watching the run live; it never replaces `complete_step`\'s own summary.',
   );

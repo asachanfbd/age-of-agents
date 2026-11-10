@@ -27,5 +27,8 @@
     "@types/ws": "^8.18.1",
     "@types/yauzl": "^3.4.0",
     "typescript": "~6.0.2"
+  },
+  "optionalDependencies": {
+    "@playwright/mcp": "0.0.85"
   }
 }

@@ -19,6 +19,7 @@ const DESCRIPTION = {
   description: 'The feature specification, self-contained for the coding agent that will run this task without seeing the planning conversation: the problem and goal, user-visible behaviour and flows, rules and states, every decision made with the user, edge and error cases, what is in and out of scope, what earlier tasks put in place, and acceptance criteria. Describe what and why, not how: no file paths, code names, data structures or coding steps.',
 };
 const ID = { type: 'string', description: 'The task id, as list_tasks or create_task reported it.' };
+const WAITS = { type: 'boolean', description: '"UI planning waits for parent": true only when the task\'s UI builds on UI a parent task introduces (nothing runs until the parents are merged); false (the default) runs its UI Planning as soon as it is started.' };
 
 const TOOLS = [
   {
@@ -35,9 +36,9 @@ const TOOLS = [
   },
   {
     name: 'update_task',
-    description: "Change an existing task's title and/or description. A numbered title keeps its <session>.<task> prefix. A task that is currently running, or already done, cannot be changed — create a new task for further work instead.",
-    inputSchema: { type: 'object', properties: { id: ID, title: TITLE, description: DESCRIPTION }, required: ['id'], additionalProperties: false },
-    call: (args) => daemon('PATCH', `/${encodeURIComponent(args?.id ?? '')}`, { title: args?.title, description: args?.description }, (item) => `Updated task ${item.id}: ${item.title}`),
+    description: "Change an existing task's title, description and/or its uiPlanningWaitsForParent setting. A numbered title keeps its <session>.<task> prefix. A task that is currently running, or already done, cannot be changed — create a new task for further work instead.",
+    inputSchema: { type: 'object', properties: { id: ID, title: TITLE, description: DESCRIPTION, uiPlanningWaitsForParent: WAITS }, required: ['id'], additionalProperties: false },
+    call: (args) => daemon('PATCH', `/${encodeURIComponent(args?.id ?? '')}`, { title: args?.title, description: args?.description, uiPlanningWaitsForParent: args?.uiPlanningWaitsForParent }, (item) => `Updated task ${item.id}: ${item.title}`),
   },
   {
     name: 'delete_task',
