@@ -322,6 +322,25 @@ test('startDocsBootstrapTask puts the setup item on the board and starts it thro
   terminal.starts[1]?.onExit(0);
 });
 
+test('bug 19.001.001: the "Set up project documentation" task runs on the owner\'s selected default agent, not the first configured one', async () => {
+  const { defaultExecutorStore } = await import('../src/executors/defaultExecutorInstance.ts');
+  const terminal = fakeTerminalHost();
+  const manager = worker.createWorkerManager({ runClaudeTurn: async () => { throw new Error('unused'); }, terminalSessions: terminal.host });
+  const project = await service.createProject({ name: 'Docs On Default', position: null });
+  await defaultExecutorStore.set({ executorId: 'test-claude-cli-alt', label: 'Alt' });
+  try {
+    const item = await service.startDocsBootstrapTask(project, { createPlanItem: planItemService.createPlanItem, enqueuePlanItemExecution: manager.enqueuePlanItemExecution });
+    const runId = (await planItemService.getPlanItem(item.id)).workflowRunId!;
+    await manager.whenStartupSettled(runId);
+    assert.equal((await manager.getWorkflowRun(runId)).executorId, 'test-claude-cli-alt');
+    const [task] = (await manager.listTasksForProject(project.id)).filter((entry) => entry.planItemId === item.id);
+    assert.equal(task?.executorId, 'test-claude-cli-alt');
+    await manager.stopWorkflowRun(runId);
+  } finally {
+    await defaultExecutorStore.clear();
+  }
+});
+
 test('startDocsBootstrapTask leaves the item on the board when the start fails', async () => {
   const project = await service.createProject({ name: 'Start Fails', position: null, repositoryUrl: 'https://github.com/test/repo' });
   const failing = await service.startDocsBootstrapTask(project, {

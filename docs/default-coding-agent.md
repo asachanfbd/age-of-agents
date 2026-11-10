@@ -36,6 +36,19 @@ The daemon re-checks at startup, on every new quota reading (the analytics sampl
 - **Footer.** Each agent has a dot, filled for the default and hollow for the others, acting as a radio group. The dot is its own keyboard-focusable button named "Make <label> the default coding agent"; clicking it only sets the default and does not open Agent analytics. An unavailable agent's dot is disabled with its reason as tooltip. The hover card shows "Default coding agent" for the default. A failed request raises an error notification.
 - **Agent analytics.** A "Default for new sessions" button beside the agent selector. It shows a pressed state when that agent is already the default, is disabled for retired and unavailable agents with the reason as its tooltip, and shows a failed request in the dialog's alert area.
 
+### Runs started with no agent choice
+
+Bug 19.001.001. A run that names no agent uses the stored default, through one daemon helper (`createFallbackExecutor` in `server/src/executors/fallbackExecutor.ts`, wired as `resolveFallbackExecutor` in `defaultExecutorInstance.ts` and injected into the worker manager as `resolveDefaultExecutor`). This covers:
+
+- Set up, Reconfigure and Repair testing (no picker; the web sends no agent);
+- the new-Project "Set up project documentation" task;
+- `POST /api/plan-items/:id/execute` with no agent and no agent saved on the task, including a queued entry, which resolves the agent when it actually starts;
+- a planning or ordinary session started with no agent;
+- a workflow step whose own and run agents are both gone (last resort);
+- the scheduler's usage gate, which reads the default agent's quota.
+
+Explicit choices still win, in this order: the request's agent, the task's saved agent, the step's own agent, then the default. With no default stored, or a stored default that is gone or not a CLI kind, the helper uses the first configured interactive CLI agent. It never re-checks or reads quota itself, so a start stays cheap; the next re-check (above) repairs a stale default.
+
 ## The shared coding-agent picker
 
 One dropdown, labelled "Coding agent", defined once in `web/src/ui/CodingAgentPicker.tsx` with its selection rule in `web/src/ui/useExecutorChoice.ts` and the pure rules in `web/src/lib/executorAvailability.ts`.
@@ -46,7 +59,7 @@ One dropdown, labelled "Coding agent", defined once in `web/src/ui/CodingAgentPi
 - **While a surface is open.** An untouched picker follows the current default live. Once the person picks, it keeps the choice. A choice that becomes unavailable falls back to the preselection and is not restored if the agent frees up again.
 - With no agents configured it shows "No coding agent is configured".
 
-Used by: Start task, Plan & bugs (the no-agent notice and "Create session"; the earlier Plan and Report bug dialogs are gone), the bug session's Start session form, the PR tab's Resolve conflicts dialog (which asks every time, including on Retry, and remembers no agent), and Start pending tasks, whose "Coding agent for all" preselects the same way and whose per-row pickers add a leading "Same as all" entry (see [Unified Planning board](unified-planning-board.md#starting-several-pending-tasks)). Not covered: the agent Auto-merge's own conflict resolution uses, scheduled jobs, testing setup runs and per-step agents in workflows and Building Types.
+Used by: Start task, Plan & bugs (the no-agent notice and "Create session"; the earlier Plan and Report bug dialogs are gone), the bug session's Start session form, the PR tab's Resolve conflicts dialog (which asks every time, including on Retry, and remembers no agent), and Start pending tasks, whose "Coding agent for all" preselects the same way and whose per-row pickers add a leading "Same as all" entry (see [Unified Planning board](unified-planning-board.md#starting-several-pending-tasks)). Not covered: the agent Auto-merge's own conflict resolution uses, scheduled jobs, testing setup runs (they use the default; see [Runs started with no agent choice](#runs-started-with-no-agent-choice)) and per-step agents in workflows and Building Types.
 
 ## Start task dialog
 

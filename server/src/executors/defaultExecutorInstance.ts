@@ -3,6 +3,7 @@ import { raiseNotification, resolveNotifications } from '../notifications/notifi
 import { getExecutorLimits } from './claudeUsage.ts';
 import { DefaultExecutorService, type DefaultExecutorStore } from './defaultExecutor.ts';
 import { listExecutors } from './executorService.ts';
+import { createFallbackExecutor } from './fallbackExecutor.ts';
 
 export const defaultExecutorStore: DefaultExecutorStore = {
   get: () => defaultExecutorDb.get('default'),
@@ -21,3 +22,6 @@ export const defaultExecutor = new DefaultExecutorService({
   raise: raiseNotification,
   resolve: resolveNotifications,
 });
+
+/** The agent a run uses when none was chosen: the owner's selected default, else the first CLI agent. */
+export const resolveFallbackExecutor = createFallbackExecutor({ current: () => defaultExecutor.current(), listExecutors });

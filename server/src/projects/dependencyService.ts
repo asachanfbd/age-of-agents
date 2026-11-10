@@ -7,8 +7,9 @@ import { raiseNotification, resolveNotifications } from '../notifications/notifi
 import type { WorkerEvent } from '../worker/workerManager.ts';
 import { createKeyedQueue, safeReason } from './autoMerge.ts';
 import {
-  DependencyConflictError, DependencyInvalidError, LONG_WAIT_MS, assertAcyclicAndShallow, chainDependencies, compareStartOrder, evaluateParent,
-  isChainable, isEligibleParent, isReadyForDependencies, parentsOf, parseDependsOn, sameReasons, unsatisfiedReasons,
+  DependencyConflictError, DependencyInvalidError, EARLY_STEP_ID, LONG_WAIT_MS, assertAcyclicAndShallow, chainDependencies, compareStartOrder, evaluateParent,
+  isChainable, isEligibleParent, isReadyForDependencies, parentsOf, parseDependsOn, parseUiPlanningWaits, sameReasons, uiPlanningWaitsLockedReason,
+  unsatisfiedReasons, wantsEarlyRun,
 } from './dependencies.ts';
 import type { ParentFacts, ParentVerdict } from './dependencies.ts';
 import type { DependencyGit } from './dependencyGit.ts';
@@ -33,6 +34,8 @@ export interface DependencyDeps {
   startPlanItem(planItemId: string, options: DependentStartOptions): Promise<StartPlanItemResult>;
   /** Turns a task's Auto-merge on (the one-click toggle and the chain shortcut). */
   enableAutoMerge(projectId: string, planItemId: string): Promise<PlanItemRecord>;
+  /** Early UI Planning runs; without them a waiting task never runs anything before its parents are merged. */
+  early?: EarlyRunDeps;
   onWorkerEvent(listener: (event: WorkerEvent) => void): () => void;
   onProjectSync(listener: (projectId: string) => void): () => void;
   publish(event: WorkerEvent): void;
@@ -40,6 +43,21 @@ export interface DependencyDeps {
   /** Calls `tick` every `ms` and returns a function that stops it; defaults to `setInterval`. */
   schedule?: (tick: () => void, ms: number) => () => void;
   evaluateEveryMs?: number;
+}
+
+/** What the service asks of the workflow engine for a waiting task's early UI Planning run (see WorkflowRunRecord.early). */
+export interface EarlyRunDeps {
+  /** The early step (UI Planning) the workflow this start would run begins with; null when it has none. */
+  earlyStepFor(planItemId: string, options: DependentStartOptions): Promise<string | null>;
+  /** Starts a waiting task's early run (only its UI Planning step), or queues it when the Project is at its task limit. */
+  startEarlyRun(planItemId: string, options: DependentStartOptions): Promise<StartPlanItemResult>;
+  /** The task's not-yet-started entry in the Project's waiting list, if any. */
+  queuedStartOf(planItemId: string): Promise<PlanItemQueueEntry | null>;
+  removeQueuedStart(entryId: string): Promise<void>;
+  /** Lets a held early run continue now that its parents are merged; false when it is not held (any more). */
+  releaseHeldRun(runId: string): Promise<boolean>;
+  /** Stops and deletes a task's early run with its worktree and branch, so the task is ready again. */
+  discardEarlyRun(runId: string): Promise<void>;
 }
 
 /** The result of Start on a dependent task: a run now, or the task waiting for its parents. */
@@ -58,6 +76,16 @@ export interface ParentStatus {
   reason: DependencyReason | null;
 }
 
+/** Without an engine to run them, no task runs early. */
+const NO_EARLY_RUNS: EarlyRunDeps = {
+  earlyStepFor: async () => null,
+  startEarlyRun: async () => { throw new Error('Early runs are not available.'); },
+  queuedStartOf: async () => null,
+  removeQueuedStart: async () => undefined,
+  releaseHeldRun: async () => false,
+  discardEarlyRun: async () => undefined,
+};
+
 const message = (error: unknown): string => safeReason(error instanceof Error ? error.message : String(error));
 
 /**
@@ -70,6 +98,9 @@ export function createDependencyService(deps: DependencyDeps) {
   const queue = createKeyedQueue();
   const inFlight = new Set<Promise<void>>();
   const now = deps.now ?? Date.now;
+  const engine: EarlyRunDeps = deps.early ?? NO_EARLY_RUNS;
+  /** The last reason each task's early start was refused, so a repeating refusal is logged once. */
+  const earlyStartFailures = new Map<string, string>();
 
   async function requireItem(projectId: string, itemId: string): Promise<PlanItemRecord> {
     const item = await planItemsDb.get(itemId);
@@ -85,6 +116,13 @@ export function createDependencyService(deps: DependencyDeps) {
 
   function assertReady(item: PlanItemRecord): void {
     if (!isReadyForDependencies(item)) throw new DependencyConflictError('Dependencies can only be changed on a ready task that has not started.');
+  }
+
+  /** The task's run when it is an early run of a task still waiting for its parents; null otherwise. */
+  async function earlyRunOf(item: PlanItemRecord): Promise<WorkflowRunRecord | null> {
+    if (!item.waiting || !item.workflowRunId) return null;
+    const run = await workflowRunsDb.get(item.workflowRunId);
+    return run?.early ? run : null;
   }
 
   async function write(itemId: string, patch: Partial<PlanItemRecord>): Promise<PlanItemRecord> {
@@ -156,14 +194,21 @@ export function createDependencyService(deps: DependencyDeps) {
 
   // ---- Defining dependencies ----
 
-  /** `requireEligibleParents` (a session's tool) re-checks every parent inside the exclusive section, so a start or merge that lands first is seen. */
-  function setDependencies(projectId: string, itemId: string, raw: unknown, options: { requireEligibleParents?: boolean } = {}): Promise<PlanItemRecord> {
+  /**
+   * `requireEligibleParents` (a session's tool) re-checks every parent inside the exclusive section, so a start or merge that lands first is seen.
+   * `uiPlanningWaitsForParent` (a session's tool) is saved in the same write, and checked against the new parents before anything is saved.
+   */
+  function setDependencies(
+    projectId: string, itemId: string, raw: unknown, options: { requireEligibleParents?: boolean; uiPlanningWaitsForParent?: unknown } = {},
+  ): Promise<PlanItemRecord> {
     const next = parseDependsOn(raw);
     if (!next) return Promise.reject(new DependencyInvalidError('dependsOn must be an array of distinct task ids.'));
-    return exclusive(projectId, () => setDependenciesNow(projectId, itemId, next, options.requireEligibleParents === true));
+    const waits = options.uiPlanningWaitsForParent === undefined ? undefined : parseUiPlanningWaits(options.uiPlanningWaitsForParent);
+    if (waits === null) return Promise.reject(new DependencyInvalidError('uiPlanningWaitsForParent must be true or false.'));
+    return exclusive(projectId, () => setDependenciesNow(projectId, itemId, next, options.requireEligibleParents === true, waits));
   }
 
-  async function setDependenciesNow(projectId: string, itemId: string, next: string[], requireEligibleParents: boolean): Promise<PlanItemRecord> {
+  async function setDependenciesNow(projectId: string, itemId: string, next: string[], requireEligibleParents: boolean, waits?: boolean): Promise<PlanItemRecord> {
     const item = await requireItem(projectId, itemId);
     if (next.includes(itemId)) throw new DependencyConflictError('A task cannot depend on itself.');
     for (const parentId of next) {
@@ -174,11 +219,37 @@ export function createDependencyService(deps: DependencyDeps) {
       }
     }
     await requireRepository(projectId);
-    assertReady(item);
+    // A waiting task's early UI Planning does not freeze its parents: from the change on it behaves like a normal waiting task.
+    const earlyRun = await earlyRunOf(item);
+    if (!earlyRun) assertReady(item);
     assertAcyclicAndShallow(itemId, next, await projectParents(projectId));
-    const updated = await write(itemId, { dependsOn: next });
+    if (waits !== undefined) {
+      const locked = uiPlanningWaitsLockedReason({ ...item, dependsOn: next }, Boolean(earlyRun));
+      if (locked) throw new DependencyConflictError(locked);
+    }
+    const updated = await write(itemId, { dependsOn: next, ...(waits === undefined ? {} : { uiPlanningWaitsForParent: waits }) });
     if (updated.waiting) void evaluateProject(projectId);
     return updated;
+  }
+
+  /**
+   * `PUT …/ui-planning-waits`: saves the "UI planning waits for parent" setting while it can still
+   * change (`uiPlanningWaitsLockedReason`). On a waiting task the change applies at once: turning it
+   * off starts UI Planning (or queues it), turning it on takes a queued UI Planning out of the line.
+   */
+  function setUiPlanningWaits(projectId: string, itemId: string, raw: unknown): Promise<PlanItemRecord> {
+    const value = parseUiPlanningWaits(raw);
+    if (value === null) return Promise.reject(new DependencyInvalidError('uiPlanningWaitsForParent must be true or false.'));
+    return exclusive(projectId, async () => {
+      const item = await requireItem(projectId, itemId);
+      const locked = uiPlanningWaitsLockedReason(item, Boolean(await earlyRunOf(item)));
+      if (locked) throw new DependencyConflictError(locked);
+      if (item.uiPlanningWaitsForParent === value) return item;
+      const updated = readPlanItem(await write(itemId, { uiPlanningWaitsForParent: value }));
+      const project = await deps.getProject(projectId);
+      if (updated.waiting && project.repositoryUrl) await evaluateItem(project, updated);
+      return requireItem(projectId, itemId);
+    });
   }
 
   /** The "Chain tasks" shortcut: each ready task of a planning group waits for the one before it; optionally all of them get Auto-merge. */
@@ -205,28 +276,35 @@ export function createDependencyService(deps: DependencyDeps) {
 
   // ---- Starting, waiting, cancelling ----
 
-  /** Start on a dependent task: a run now when every parent is satisfied, else the task waits (staying in Planning) with these options. */
-  function startWhenReady(projectId: string, itemId: string, options: DependentStartOptions): Promise<StartWhenReadyResult> {
-    return exclusive(projectId, () => startWhenReadyNow(projectId, itemId, options));
+  /**
+   * Start on a dependent task: a run now when every parent is satisfied, else the task waits with these options
+   * (and runs its UI Planning early unless the setting says to wait). `uiPlanningWaitsForParent`, when given, is
+   * saved only once the start is accepted.
+   */
+  function startWhenReady(projectId: string, itemId: string, options: DependentStartOptions, uiPlanningWaitsForParent?: boolean): Promise<StartWhenReadyResult> {
+    return exclusive(projectId, () => startWhenReadyNow(projectId, itemId, options, uiPlanningWaitsForParent));
   }
 
-  async function startWhenReadyNow(projectId: string, itemId: string, options: DependentStartOptions): Promise<StartWhenReadyResult> {
+  async function startWhenReadyNow(projectId: string, itemId: string, options: DependentStartOptions, uiPlanningWaitsForParent?: boolean): Promise<StartWhenReadyResult> {
     const item = await requireItem(projectId, itemId);
     const project = await requireRepository(projectId);
     assertReady(item);
     if (parentsOf(item).length === 0) throw new DependencyConflictError('This task has no dependencies: start it normally.');
+    const setting = uiPlanningWaitsForParent === undefined ? {} : { uiPlanningWaitsForParent };
     const results = await verdictsFor(project, item);
     if (results.every(({ verdict }) => verdict.satisfied)) {
       const result = await deps.startPlanItem(itemId, options);
+      const saved = Object.keys(setting).length ? await write(itemId, setting) : item;
       if (result.started) return result;
       // Released at the task limit: it joins the waiting list instead of waiting for its parents.
-      return { started: false, entry: result.entry, item: item.waiting ? await write(itemId, { waiting: undefined }) : item };
+      return { started: false, entry: result.entry, item: saved.waiting ? await write(itemId, { waiting: undefined }) : saved };
     }
     const reasons = unsatisfiedReasons(results.map(({ verdict }) => verdict));
     const waiting = newWaiting(options, reasons, item.waiting);
-    const updated = await write(itemId, { waiting });
+    const updated = readPlanItem(await write(itemId, { waiting, ...setting }));
     if (waiting.state === 'blocked' && item.waiting?.state !== 'blocked') await notifyBlocked(updated, reasons);
-    return { started: false, item: updated };
+    await reconcileEarlyRun(project, updated);
+    return { started: false, item: await requireItem(projectId, itemId) };
   }
 
   function newWaiting(options: DependentStartOptions, reasons: DependencyReason[], previous?: PlanItemWaiting): PlanItemWaiting {
@@ -256,10 +334,15 @@ export function createDependencyService(deps: DependencyDeps) {
     });
   }
 
+  /** Back to plain ready: a queued UI Planning leaves the line and an early run is discarded with its worktree and branch. */
   function cancelWaiting(projectId: string, itemId: string): Promise<PlanItemRecord> {
     return exclusive(projectId, async () => {
       const item = await requireItem(projectId, itemId);
       if (!item.waiting) throw new DependencyConflictError('This task is not waiting for its parents.');
+      const earlyRun = await earlyRunOf(item);
+      if (earlyRun) await engine.discardEarlyRun(earlyRun.id);
+      const queued = await engine.queuedStartOf(itemId);
+      if (queued?.early) await engine.removeQueuedStart(queued.id);
       const updated = await write(itemId, { waiting: undefined });
       await resolveNotifications(subjectOf(updated), [...DEPENDENCY_NOTIFICATION_KINDS]);
       return updated;
@@ -290,16 +373,28 @@ export function createDependencyService(deps: DependencyDeps) {
     if (!project?.repositoryUrl) return;
     for (const listed of await waitingItems(projectId)) {
       // Re-read: an earlier child's start or the person's cancel may have changed this one.
-      const item = await planItemsDb.get(listed.id);
-      if (!item?.waiting || !isReadyForDependencies(readPlanItem(item))) continue;
-      await evaluateItem(project, readPlanItem(item));
+      const stored = await planItemsDb.get(listed.id);
+      const item = stored ? readPlanItem(stored) : null;
+      if (!item?.waiting || (!isReadyForDependencies(item) && !(await earlyRunOf(item)))) continue;
+      await evaluateItem(project, item);
     }
   }
 
   async function evaluateItem(project: ProjectRecord, item: PlanItemRecord): Promise<void> {
     const waiting = item.waiting!;
+    const earlyRun = await earlyRunOf(item);
     const results = await verdictsFor(project, item);
-    if (results.every(({ verdict }) => verdict.satisfied)) { await startChild(item); return; }
+    if (results.every(({ verdict }) => verdict.satisfied)) {
+      if (!earlyRun) { await startChild(item); return; }
+      // UI Planning is still running or waits for approval: the task continues once it is held.
+      if (earlyRun.status === 'held' && !earlyRun.early?.pendingRevision) await releaseChild(item, earlyRun);
+      return;
+    }
+    await updateReasons(item, waiting, results);
+    if (!earlyRun) await reconcileEarlyRun(project, (await requireItem(item.projectId, item.id)));
+  }
+
+  async function updateReasons(item: PlanItemRecord, waiting: PlanItemWaiting, results: { verdict: ParentVerdict }[]): Promise<void> {
     const reasons = unsatisfiedReasons(results.map(({ verdict }) => verdict));
     const next = newWaiting(waiting.options, reasons, waiting);
     if (next.state === 'blocked' && waiting.state !== 'blocked') await notifyBlocked(item, reasons);
@@ -309,6 +404,48 @@ export function createDependencyService(deps: DependencyDeps) {
     if (sameReasons(waiting.reasons, next.reasons) && waiting.state === next.state && waiting.longWaitNotified === next.longWaitNotified
       && waiting.manualWaitSince === next.manualWaitSince) return;
     await write(item.id, { waiting: next });
+  }
+
+  /**
+   * Brings a waiting task without an early run in line with its setting: starts (or queues) its UI
+   * Planning when it should run early, and takes a queued early start out of the line when it should
+   * not (the setting was turned on). Idempotent: an existing queue entry is never doubled.
+   */
+  async function reconcileEarlyRun(project: ProjectRecord, item: PlanItemRecord): Promise<void> {
+    if (!item.waiting) return;
+    const options = item.waiting.options;
+    const hasRepository = Boolean(project.repositoryUrl);
+    // The early step is always EARLY_STEP_ID when a workflow has one, so the cheap checks run before the workflow is resolved.
+    const wanted = wantsEarlyRun({ item, options, hasRepository, earlyStepId: EARLY_STEP_ID })
+      && wantsEarlyRun({ item, options, hasRepository, earlyStepId: await engine.earlyStepFor(item.id, options).catch(() => null) });
+    const queued = await engine.queuedStartOf(item.id);
+    if (!wanted) {
+      if (queued?.early) await engine.removeQueuedStart(queued.id);
+      return;
+    }
+    if (queued || item.workflowRunId) return;
+    try {
+      await engine.startEarlyRun(item.id, options);
+      earlyStartFailures.delete(item.id);
+    } catch (error) {
+      // Stays waiting without an early run; the next evaluation tries again. Logged only when the reason changes, not every tick.
+      const reason = message(error);
+      if (earlyStartFailures.get(item.id) === reason) return;
+      earlyStartFailures.set(item.id, reason);
+      console.error(`Could not start the early UI Planning of task ${item.id}: ${reason}`);
+    }
+  }
+
+  /** Parents merged after UI Planning was approved: the held run goes on to its next step, through the slot line. */
+  async function releaseChild(item: PlanItemRecord, run: WorkflowRunRecord): Promise<void> {
+    try {
+      if (!(await engine.releaseHeldRun(run.id))) return;
+    } catch (error) {
+      const reasons: DependencyReason[] = [{ text: `Could not continue yet: ${message(error)}`, blocked: false }];
+      if (!sameReasons(item.waiting!.reasons, reasons)) await write(item.id, { waiting: { ...item.waiting!, reasons, state: 'waiting', updatedAt: new Date(now()).toISOString() } });
+      return;
+    }
+    await notifyStarted(item);
   }
 
   async function startChild(item: PlanItemRecord): Promise<void> {
@@ -324,6 +461,10 @@ export function createDependencyService(deps: DependencyDeps) {
       if (!sameReasons(item.waiting!.reasons, reasons) || item.waiting!.state !== next.state) await write(item.id, { waiting: next });
       return;
     }
+    await notifyStarted(item);
+  }
+
+  async function notifyStarted(item: PlanItemRecord): Promise<void> {
     await resolveNotifications(subjectOf(item), [...DEPENDENCY_NOTIFICATION_KINDS]);
     await raiseNotification({
       kind: 'dependency.started', subject: subjectOf(item), title: item.title,
@@ -349,7 +490,8 @@ export function createDependencyService(deps: DependencyDeps) {
 
   async function onEvent(event: WorkerEvent): Promise<void> {
     if (event.type === 'workflowRun') {
-      if (await projectsWaitingOn(event.run.projectId, event.run.planItemId)) await evaluateProject(event.run.projectId);
+      // An early run changing state (held after approval, say) is the waiting task's own news.
+      if (event.run.early || await projectsWaitingOn(event.run.projectId, event.run.planItemId)) await evaluateProject(event.run.projectId);
     } else if (event.type === 'planItem') {
       if (await projectsWaitingOn(event.planItem.projectId, event.planItem.id)) await evaluateProject(event.planItem.projectId);
     } else if (event.type === 'planItemDeleted') {
@@ -384,7 +526,7 @@ export function createDependencyService(deps: DependencyDeps) {
     while (inFlight.size > 0) await Promise.allSettled([...inFlight]);
   }
 
-  return { setDependencies, chainGroup, startWhenReady, cancelWaiting, statusOf, evaluateProject, evaluateAll, start, idle };
+  return { setDependencies, setUiPlanningWaits, chainGroup, startWhenReady, cancelWaiting, statusOf, evaluateProject, evaluateAll, start, idle };
 }
 
 function defaultSchedule(tick: () => void, ms: number): () => void {

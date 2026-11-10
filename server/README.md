@@ -64,12 +64,14 @@ A planning session manages its Project's open Tasks live, through a session-scop
 |---|---|---|
 | `list_tasks` | `GET /api/agent-tasks` | the Project's PlanItems, in display order |
 | `create_task` (`title`, `description`) | `POST /api/agent-tasks` | adds the next numbered item |
-| `update_task` (`id`, `title?`, `description?`) | `PATCH /api/agent-tasks/:itemId` | edits an item; refuses (409) one already `done` — further work on it goes in a new task |
+| `update_task` (`id`, `title?`, `description?`, `uiPlanningWaitsForParent?`) | `PATCH /api/agent-tasks/:itemId` | edits an item; refuses (409) one already `done` — further work on it goes in a new task — and the boolean setting on one that has started |
 | `delete_task` (`id`) | `DELETE /api/agent-tasks/:itemId` | removes an item |
 
 Each change is broadcast over `/ws` (`planItem` / `planItemDeleted`). The routes answer 401 without the token, 400 for bad input, 404 for an unknown task or an item in another Project, and 409 unless the caller is a `'plan'`-kind Task that is still `developing`, or when the item has a Task running.
 
 Every planning session gets a number within its Project (`TaskRecord.planningSessionNumber`, kept by follow-ups), and every item it creates is titled `<session>.<task>: <title>`, the task number zero-padded to three digits (e.g. `3.002: Add login`) (`PlanItemRecord.planningRef`), numbered one past the highest the session already has. Editing a numbered item keeps its prefix. Task changes are serialized per Project, so concurrent `create_task` calls never share a number. Shell tools stay denied: an MCP tool is the one channel both CLIs expose to such a session.
+
+The prompt (`PLAN_INSTRUCTIONS`, `src/projects/plan.ts`) makes the session interview the user before its first `create_task`, even for a short request, and confirm the scope, decisions and open assumptions before filing; each task must carry the specification completeness checklist (`src/projects/planningInterview.ts`, shared with the Plan & bugs prompt). Nothing on the routes enforces the confirmation: `create_task` still takes only `title` and `description`.
 
 ### Running configured tests from a coding session
 

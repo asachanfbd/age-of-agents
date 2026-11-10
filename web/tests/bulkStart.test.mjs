@@ -26,7 +26,8 @@ const {
   buildBulkRows, waitsForText, selectableIds, toggleChecked, checkedRows, selectionSummary, playButtonState, SAME_AS_ALL, liveOverride, rowAgentId,
   setOverride, sameAsAllLabel, lockedAgentLabel, rowStartOptions, startButtonLabel, startBlockReason, bulkLimitNote, classifyStart, refusalMessage,
   rowStatusText, summaryLine, progressLine, failedIds, rowPickerEnabled, createBulkRunner, NO_WORKFLOW_NOTE, DEFAULTS_NOTE, NOTHING_TO_START,
-  NOT_SELECTED_STATUS, NO_AGENT_REASON, NOTHING_SELECTED_REASON, PLAY_BUTTON_LABEL,
+  NOT_SELECTED_STATUS, NO_AGENT_REASON, NOTHING_SELECTED_REASON, PLAY_BUTTON_LABEL, AUTO_MERGE_ALL_DEFAULT, setAutoMergeOverride, rowAutoMerge,
+  lockedAutoMergeLabel, rowSendOptions,
 } = bulk;
 
 const src = (path) => readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8');
@@ -48,7 +49,7 @@ const CLAUDE = executor('claude', 'Claude Code', { isDefault: true });
 const CODEX = executor('codex', 'Codex', { kind: 'codex-cli' });
 const OUT = { limits: { observedAt: 1, fiveHour: { usedPercentage: 100, resetsAt: null }, sevenDay: null } };
 const EXECUTORS = [CLAUDE, CODEX];
-const bulkRow = (id, patch = {}) => ({ id, title: id, kind: 'Task', number: null, needsMoreInfo: false, hasParents: false, workflowId: 'wf-default', locked: false, autoMerge: false, ...patch });
+const bulkRow = (id, patch = {}) => ({ id, title: id, kind: 'Task', number: null, needsMoreInfo: false, hasParents: false, workflowId: 'wf-default', locked: false, ...patch });
 const rows7 = Array.from({ length: 7 }, (_, index) => bulkRow(`r${index + 1}`));
 const deferred = () => { let resolve; let reject; const promise = new Promise((ok, fail) => { resolve = ok; reject = fail; }); return { promise, resolve, reject }; };
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -141,7 +142,7 @@ test('U11 no default workflow: locked, unchecked, its note, and out of the count
 test('U12 no workflows enabled: startable, and workflowId left out of the start', () => {
   const [only] = buildBulkRows([task('a')], [item('a')], { projectDefaultId: '', enabledIds: [], bugWorkflowId: 'bug-fix' });
   assert.equal(only.locked, false);
-  assert.equal('workflowId' in rowStartOptions(only, 'claude', true), false);
+  assert.equal('workflowId' in rowStartOptions(only, 'claude', true, true), false);
 });
 
 test('U13 a bug gets the bug workflow through startWorkflowChoice, else the Project default when that one is disabled', () => {
@@ -231,17 +232,25 @@ test('U26 no usable agent: Start is disabled with its reason and rows read "No a
 
 // ---- Start options ----
 
-test('U27 a row starts with exactly the single Start dialog\'s defaults, every step', () => {
-  const r = bulkRow('a', { autoMerge: true });
+test('AU10 a row starts with the single Start dialog\'s workflow and every step, plus this dialog\'s agent and Auto-merge', () => {
   const expected = startOptions({ executorId: 'codex', createBranch: true, hasRepository: true, autoMerge: true, workflowId: 'wf-default', skippedStepIds: [] });
-  assert.deepEqual(rowStartOptions(r, 'codex', true), expected);
+  assert.deepEqual(rowStartOptions(bulkRow('a'), 'codex', true, true), expected);
   assert.deepEqual(expected, { executorId: 'codex', createBranch: true, autoMerge: true, workflowId: 'wf-default' });
   assert.equal('skippedStepIds' in expected, false);
 });
 
-test('U28 U29 no repository: no branch and no autoMerge key; with one and Auto-merge off: autoMerge false', () => {
-  assert.deepEqual(rowStartOptions(bulkRow('a', { autoMerge: true }), 'claude', false), { executorId: 'claude', createBranch: false, workflowId: 'wf-default' });
-  assert.equal(rowStartOptions(bulkRow('a'), 'claude', true).autoMerge, false);
+test('AU11 with a repository and Auto-merge off, autoMerge false is sent', () => {
+  const options = rowStartOptions(bulkRow('a'), 'claude', false, true);
+  assert.equal('autoMerge' in options, true);
+  assert.equal(options.autoMerge, false);
+});
+
+test('AU12 no repository: no branch and no autoMerge key, even with Auto-merge on', () => {
+  assert.deepEqual(rowStartOptions(bulkRow('a'), 'claude', true, false), { executorId: 'claude', createBranch: false, workflowId: 'wf-default' });
+});
+
+test('AU13 an empty workflowId is left out while autoMerge is still sent', () => {
+  assert.deepEqual(rowStartOptions(bulkRow('a', { workflowId: '' }), 'claude', true, true), { executorId: 'claude', createBranch: true, autoMerge: true });
 });
 
 // ---- Footer ----
@@ -437,14 +446,16 @@ test('U53 100 rows keep their order and are all sent one by one', async () => {
 // ---- Integration: the real store with a stubbed daemon ----
 
 /** The dialog's own start pipeline (BulkStartDialog's runner) over the store's single-start call. */
-function storeRunner(rows, { common = 'claude', overrides = {}, hasRepository = true } = {}) {
+function storeRunner(rows, { common = 'claude', overrides = {}, hasRepository = true, autoMergeAll = AUTO_MERGE_ALL_DEFAULT, autoMergeOverrides = {} } = {}) {
   const results = {};
+  // Mutable like the dialog's `latest.current`: a test may change a choice between runs.
+  const latest = { shown: rows, overrides, commonId: common, executors: EXECUTORS, now: NOW, hasRepository, autoMergeAll, autoMergeOverrides };
   const runner = createBulkRunner(async (id) => {
-    const r = rows.find((candidate) => candidate.id === id);
-    const runId = await useWorldStore.getState().startPlanItem('p1', id, rowStartOptions(r, rowAgentId(EXECUTORS, common, overrides[id], NOW), hasRepository));
+    const { options } = rowSendOptions(latest, id);
+    const runId = await useWorldStore.getState().startPlanItem('p1', id, options);
     return classifyStart(runId, useWorldStore.getState().planItemQueueByProject.p1, id);
   }, (id, result) => { results[id] = result; });
-  return { runner, results };
+  return { runner, results, latest };
 }
 
 function stubDaemon(answers) {
@@ -455,15 +466,17 @@ function stubDaemon(answers) {
   serverApi.startWhenReady = async (projectId, id, options) => { requests.push(['start-when-ready', id, options]); return answers(id) ?? { started: true, run: run(id) }; };
   serverApi.updatePlanItem = async (...args) => { requests.push(['update', ...args]); throw new Error('no writes'); };
   serverApi.setDefaultExecutor = async (...args) => { requests.push(['default', ...args]); throw new Error('no writes'); };
+  serverApi.setAutoMerge = async (...args) => { requests.push(['auto-merge', ...args]); throw new Error('no writes'); };
   return { requests, restore: () => Object.assign(serverApi, saved) };
 }
 
 const seed = (items) => useWorldStore.setState({ planByProject: { p1: { items } }, planItemQueueByProject: {}, workflowRunsByProject: {}, executors: EXECUTORS });
 const queueEntry = (id, planItemId, position) => ({ id, projectId: 'p1', planItemId, position, createdAt: T });
 
-test('I01 I05 a row with no parents posts the startOptions body to execute, and nothing else is written', async () => {
-  seed([item('a'), item('skip')]);
-  const rows = [bulkRow('a', { autoMerge: true }), bulkRow('skip')];
+test('I01 I05 AI01 AI06 a row with no parents posts the startOptions body to execute, and nothing else is written', async () => {
+  // Saved Auto-merge off, yet the common switch (on) is what is sent; the daemon saves it with the start.
+  seed([item('a', { autoMerge: { enabled: false } }), item('skip')]);
+  const rows = [bulkRow('a'), bulkRow('skip')];
   const daemon = stubDaemon(() => null);
   try {
     const { runner, results } = storeRunner(rows, { overrides: { a: 'codex' } });
@@ -567,7 +580,8 @@ function bodyProps(patch = {}) {
   const rows = patch.rows ?? rows7;
   return {
     rows, checked: selectableIds(rows), overrides: {}, results: {}, sent: [], phase: 'idle', executors: EXECUTORS, commonId: 'claude', now: NOW, parents: {},
-    hasRepository: true, slotsInUse: 0, onCommonChange: noop, onToggle: noop, onSelectAll: noop, onSelectNone: noop, onOverride: noop, onStart: noop, onRetry: noop, onClose: noop,
+    hasRepository: true, slotsInUse: 0, autoMergeAll: true, autoMergeOverrides: {}, onCommonChange: noop, onToggle: noop, onSelectAll: noop, onSelectNone: noop, onOverride: noop,
+    onAutoMergeAllChange: noop, onAutoMergeOverride: noop, onStart: noop, onRetry: noop, onClose: noop,
     ...patch,
   };
 }
@@ -699,4 +713,354 @@ test('C17 the blueprint\'s Tasks board section describes the play button and the
   const blueprint = readFileSync(new URL('../../.docs/blueprint.md', import.meta.url), 'utf8');
   assert.match(blueprint, /Start pending tasks/);
   assert.match(blueprint, /web\/src\/lib\/bulkStart\.ts/);
+});
+
+// ---- Auto-merge (task 38.001): unit ----
+
+test('AU01 "Auto-merge for all" is on by default', () => {
+  assert.equal(AUTO_MERGE_ALL_DEFAULT, true);
+});
+
+test('AU02 a row with no override follows the common switch', () => {
+  assert.equal(rowAutoMerge(true, undefined), true);
+  assert.equal(rowAutoMerge(false, undefined), false);
+});
+
+test('AU03 switching the common value moves every row that has no override', () => {
+  const values = (common) => ['a', 'b'].map((id) => rowAutoMerge(common, ({})[id]));
+  assert.deepEqual(values(true), [true, true]);
+  assert.deepEqual(values(false), [false, false]);
+});
+
+test('AU04 an override survives a common toggle, in either direction', () => {
+  const overrides = setAutoMergeOverride({}, 'b', true);
+  const values = (common) => ['a', 'b'].map((id) => rowAutoMerge(common, overrides[id]));
+  assert.deepEqual(values(true), [true, true]);
+  assert.deepEqual(values(false), [false, true], 'b keeps its own value; a follows');
+  assert.equal(rowAutoMerge(true, setAutoMergeOverride({}, 'c', false).c), false);
+});
+
+test('AU05 an override equal to the common value stays an override', () => {
+  const overrides = setAutoMergeOverride({}, 'a', true);
+  assert.equal(rowAutoMerge(false, overrides.a), true);
+});
+
+test('AU06 clearing an override ("Same as all") makes the row follow again', () => {
+  const overrides = setAutoMergeOverride(setAutoMergeOverride({}, 'a', false), 'a', null);
+  assert.equal('a' in overrides, false);
+  assert.equal(rowAutoMerge(true, overrides.a), true);
+});
+
+test('AU07 setAutoMergeOverride never mutates its input; clearing an id with no override returns an equal map', () => {
+  const input = Object.freeze({ a: true });
+  const set = setAutoMergeOverride(input, 'b', false);
+  assert.deepEqual(input, { a: true });
+  assert.deepEqual(set, { a: true, b: false });
+  const cleared = setAutoMergeOverride(input, 'missing', null);
+  assert.deepEqual(cleared, { a: true });
+  assert.notEqual(cleared, input);
+});
+
+test('AU08 a stale override for a row no longer listed changes no other row', () => {
+  const rows = [bulkRow('a'), bulkRow('b')];
+  const snapshot = (autoMergeOverrides) => ({ shown: rows, overrides: {}, commonId: 'claude', executors: EXECUTORS, now: NOW, hasRepository: true, autoMergeAll: true, autoMergeOverrides });
+  for (const id of ['a', 'b']) assert.deepEqual(rowSendOptions(snapshot({ ghost: false }), id), rowSendOptions(snapshot({}), id));
+});
+
+test('AU09 locked label: on/off, and "(chosen for this task)" for a row\'s own value, even one equal to the common one', () => {
+  assert.equal(lockedAutoMergeLabel(true, undefined), 'Auto-merge on');
+  assert.equal(lockedAutoMergeLabel(false, undefined), 'Auto-merge off');
+  assert.equal(lockedAutoMergeLabel(false, true), 'Auto-merge on (chosen for this task)');
+  assert.equal(lockedAutoMergeLabel(true, false), 'Auto-merge off (chosen for this task)');
+  assert.equal(lockedAutoMergeLabel(true, true), 'Auto-merge on (chosen for this task)');
+});
+
+test('AU14 rows no longer carry the task\'s saved Auto-merge', () => {
+  const rows = buildBulkRows([task('on'), task('off')], [item('on', { autoMerge: { enabled: true } }), item('off', { autoMerge: { enabled: false } })], DEFAULTS);
+  for (const r of rows) assert.equal('autoMerge' in r, false);
+});
+
+const snapshotOf = (rows, patch = {}) => ({ shown: rows, overrides: {}, commonId: 'claude', executors: EXECUTORS, now: NOW, hasRepository: true, autoMergeAll: true, autoMergeOverrides: {}, ...patch });
+
+test('AU15 the saved setting is ignored end to end: the common switch decides', () => {
+  const rows = buildBulkRows([task('on'), task('off')], [item('on', { autoMerge: { enabled: true } }), item('off', { autoMerge: { enabled: false } })], DEFAULTS);
+  assert.equal(rowSendOptions(snapshotOf(rows), 'off').options.autoMerge, true, 'saved Off sends true under common ON');
+  assert.equal(rowSendOptions(snapshotOf(rows, { autoMergeAll: false }), 'on').options.autoMerge, false, 'saved On sends false under common OFF');
+});
+
+test('AU16 rowSendOptions combines the agent and Auto-merge overrides per row', () => {
+  const rows = [bulkRow('own'), bulkRow('follower')];
+  const snapshot = snapshotOf(rows, { overrides: { own: 'codex' }, autoMergeOverrides: { own: false } });
+  const own = rowSendOptions(snapshot, 'own');
+  assert.equal(own.row, rows[0]);
+  assert.deepEqual(own.options, { executorId: 'codex', createBranch: true, autoMerge: false, workflowId: 'wf-default' });
+  assert.deepEqual(rowSendOptions(snapshot, 'follower').options, { executorId: 'claude', createBranch: true, autoMerge: true, workflowId: 'wf-default' });
+});
+
+test('AU17 without a repository no autoMerge is sent, overrides or not', () => {
+  const rows = [bulkRow('a')];
+  const { options } = rowSendOptions(snapshotOf(rows, { hasRepository: false, autoMergeOverrides: { a: true } }), 'a');
+  assert.equal('autoMerge' in options, false);
+  assert.equal(options.createBranch, false);
+});
+
+test('AU17b a row that is not listed is refused, so the runner marks it failed', async () => {
+  assert.throws(() => rowSendOptions(snapshotOf([]), 'gone'), /Row gone is not listed\./);
+  const results = {};
+  await createBulkRunner(async (id) => { rowSendOptions(snapshotOf([]), id); return { status: 'started' }; }, (id, result) => { results[id] = result; }).run(['gone']);
+  assert.deepEqual(results.gone, { status: 'failed', message: 'Row gone is not listed.' });
+});
+
+test('AU18 Retry reads the latest value: a refused row is re-sent with the switch it shows now', async () => {
+  const rows = [bulkRow('a'), bulkRow('b')];
+  const latest = snapshotOf(rows);
+  const sent = [];
+  let refuse = true;
+  const results = {};
+  const runner = createBulkRunner(async (id) => {
+    const { options } = rowSendOptions(latest, id);
+    sent.push([id, options.autoMerge]);
+    if (id === 'b' && refuse) { refuse = false; throw new Error('busy'); }
+    return { status: 'started' };
+  }, (id, result) => { results[id] = result; });
+  await runner.run(['a', 'b']);
+  latest.autoMergeOverrides = setAutoMergeOverride(latest.autoMergeOverrides, 'b', false);
+  await runner.run(failedIds(rows, results));
+  assert.deepEqual(sent, [['a', true], ['b', true], ['b', false]]);
+});
+
+test('AU19 a change made while an earlier row is starting reaches the later row', async () => {
+  const rows = [bulkRow('a'), bulkRow('b')];
+  const latest = snapshotOf(rows);
+  const gate = deferred();
+  const sent = {};
+  const runner = createBulkRunner(async (id) => {
+    sent[id] = rowSendOptions(latest, id).options.autoMerge;
+    if (id === 'a') await gate.promise;
+    return { status: 'started' };
+  }, () => undefined);
+  const done = runner.run(['a', 'b']);
+  await tick();
+  latest.autoMergeOverrides = { b: false };
+  gate.resolve();
+  await done;
+  assert.deepEqual(sent, { a: true, b: false });
+});
+
+test('AU20 the defaults note no longer says the options are the task\'s own', () => {
+  assert.equal(DEFAULTS_NOTE, 'Each task runs its default workflow with every step. Open a task to change them.');
+});
+
+// ---- Auto-merge: integration with the real store and a stubbed daemon ----
+
+test('AI02 one batch sends each row\'s own value in order: an override off, then a follower on', async () => {
+  seed([item('a'), item('b')]);
+  const daemon = stubDaemon(() => null);
+  try {
+    const { runner } = storeRunner([bulkRow('a'), bulkRow('b')], { autoMergeOverrides: { a: false } });
+    await runner.run(['a', 'b']);
+    assert.deepEqual(daemon.requests.map(([kind, id, options]) => [kind, id, options.autoMerge]), [['execute', 'a', false], ['execute', 'b', true]]);
+  } finally { daemon.restore(); }
+});
+
+test('AI03 a row with parents sends autoMerge through start-when-ready', async () => {
+  const child = item('child', { dependsOn: ['parent'] });
+  seed([item('parent'), child]);
+  const daemon = stubDaemon(() => ({ started: false, item: { ...child, waiting: { state: 'waiting', reasons: [], options: {}, since: T } } }));
+  try {
+    const { runner } = storeRunner([bulkRow('child', { hasParents: true })], { autoMergeAll: false });
+    await runner.run(['child']);
+    assert.deepEqual(daemon.requests[0], ['start-when-ready', 'child', { executorId: 'claude', createBranch: true, autoMerge: false, workflowId: 'wf-default', uiPlanningWaitsForParent: false }]);
+  } finally { daemon.restore(); }
+});
+
+test('AI04 a 202 queued answer: the request carried autoMerge and the row shows Queued', async () => {
+  seed([item('a')]);
+  const daemon = stubDaemon((id) => ({ started: false, entry: queueEntry(`e-${id}`, id, 0) }));
+  try {
+    const { runner, results } = storeRunner([bulkRow('a')]);
+    await runner.run(['a']);
+    assert.equal(daemon.requests[0][2].autoMerge, true);
+    assert.deepEqual(results.a, { status: 'queued', position: 1 });
+  } finally { daemon.restore(); }
+});
+
+test('AI05 no repository: the execute body has no autoMerge key and no branch', async () => {
+  seed([item('a')]);
+  const daemon = stubDaemon(() => null);
+  try {
+    const { runner } = storeRunner([bulkRow('a')], { hasRepository: false, autoMergeOverrides: { a: true } });
+    await runner.run(['a']);
+    assert.deepEqual(daemon.requests, [['execute', 'a', { executorId: 'claude', createBranch: false, workflowId: 'wf-default' }]]);
+  } finally { daemon.restore(); }
+});
+
+test('AI07 Retry after a 409 re-sends only that row, with its flipped Auto-merge', async () => {
+  seed([item('a'), item('b')]);
+  let refuse = true;
+  const daemon = stubDaemon((id) => { if (id === 'b' && refuse) { refuse = false; throw new ApiError('Folder busy', 409); } return null; });
+  try {
+    const rows = [bulkRow('a'), bulkRow('b')];
+    const { runner, results, latest } = storeRunner(rows);
+    await runner.run(['a', 'b']);
+    latest.autoMergeOverrides = setAutoMergeOverride(latest.autoMergeOverrides, 'b', false);
+    daemon.requests.length = 0;
+    await runner.run(failedIds(rows, results));
+    assert.deepEqual(daemon.requests.map(([, id, options]) => [id, options.autoMerge]), [['b', false]]);
+    assert.deepEqual(results.b, { status: 'started' });
+  } finally { daemon.restore(); }
+});
+
+// ---- Auto-merge: components ----
+
+const tagWithId = (html, id) => html.match(new RegExp(`<button[^>]*id="${id}"[^>]*>`))?.[0];
+const rowSwitch = (html, id) => tagWithId(html, `bulk-start-row-${id}-auto-merge`);
+const COMMON_SWITCH = 'bulk-start-auto-merge';
+const ab = [bulkRow('a', { title: 'Alpha' }), bulkRow('b', { title: 'Beta' })];
+const rowHtml = (html, id) => { const start = html.indexOf(`data-row="${id}"`); const end = html.indexOf('data-row="', start + 1); return html.slice(start, end === -1 ? undefined : end); };
+
+test('AC01 "Auto-merge for all": label, default-size switch on, help line, between the agent picker and the list', async () => {
+  const html = await body(bodyProps({ rows: ab }));
+  assert.match(html, /<label[^>]*for="bulk-start-auto-merge"[^>]*>Auto-merge for all<\/label>/);
+  const common = tagWithId(html, COMMON_SWITCH);
+  assert.match(common, /role="switch"/);
+  assert.match(common, /aria-checked="true"/);
+  assert.match(common, /data-size="default"/);
+  assert.match(html, /Merges each task(&#x27;|')s pull request once it completes\./);
+  const at = html.indexOf(`id="${COMMON_SWITCH}"`);
+  assert.ok(html.indexOf('id="bulk-start-agent"') < at && at < html.indexOf('<ul'));
+});
+
+test('AC02 default ON: the dialog starts with AUTO_MERGE_ALL_DEFAULT and no overrides; every row switch is on', async () => {
+  const dialog = src('ui/project-popup/BulkStartDialog.tsx');
+  assert.match(dialog, /const \[autoMergeAll, setAutoMergeAll\] = useState\(AUTO_MERGE_ALL_DEFAULT\);/);
+  assert.match(dialog, /const \[autoMergeOverrides, setAutoMergeOverrides\] = useState<Record<string, boolean>>\(\{\}\);/);
+  const html = await body(bodyProps({ rows: ab }));
+  for (const id of ['a', 'b']) assert.match(rowSwitch(html, id), /aria-checked="true"/, id);
+});
+
+test('AC03 common OFF flows to every row without an override', async () => {
+  const html = await body(bodyProps({ rows: ab, autoMergeAll: false }));
+  assert.match(tagWithId(html, COMMON_SWITCH), /aria-checked="false"/);
+  for (const id of ['a', 'b']) assert.match(rowSwitch(html, id), /aria-checked="false"/, id);
+});
+
+test('AC04 a row override shows its own value and the overridden marker', async () => {
+  const html = await body(bodyProps({ rows: ab, autoMergeAll: false, autoMergeOverrides: { b: true } }));
+  assert.match(rowSwitch(html, 'a'), /aria-checked="false"/);
+  assert.match(rowSwitch(html, 'b'), /aria-checked="true"/);
+  const label = rowHtml(html, 'b').match(/<label[^>]*data-auto-merge-overridden="true"[^>]*>/)?.[0];
+  assert.ok(label, 'overridden marker');
+  assert.match(label, /data-\[auto-merge-overridden=true\]:font-semibold/);
+  assert.match(label, /data-\[auto-merge-overridden=true\]:text-foreground/);
+  assert.doesNotMatch(rowHtml(html, 'a'), /data-auto-merge-overridden=/);
+});
+
+test('AC05 "Same as all" only on an overridden row, with its name and a 24px hit area', async () => {
+  const html = await body(bodyProps({ rows: ab, autoMergeOverrides: { b: false } }));
+  assert.doesNotMatch(rowHtml(html, 'a'), /Same as all</);
+  const button = rowHtml(html, 'b').match(/<button[^>]*aria-label="Use auto-merge for all for Beta"[^>]*>Same as all<\/button>/)?.[0];
+  assert.ok(button, 'Same as all button');
+  assert.match(button, /h-6/);
+});
+
+test('AC06 the row switch: its name, default size, outside the checkbox label', async () => {
+  const html = await body(bodyProps({ rows: ab }));
+  const tag = rowSwitch(html, 'a');
+  assert.match(tag, /aria-label="Auto-merge for Alpha"/);
+  assert.match(tag, /data-size="default"/);
+  const start = html.lastIndexOf('<label', html.indexOf('for="bulk-start-row-a"'));
+  const label = html.slice(start, html.indexOf('</label>', start));
+  assert.ok(!label.includes('bulk-start-row-a-auto-merge'));
+});
+
+test('AC07 titles are escaped in the switch and "Same as all" names; a 2,000-character title is kept whole', async () => {
+  const html = await body(bodyProps({ rows: [bulkRow('q', { title: 'Fix "a" & b' })], autoMergeOverrides: { q: true } }));
+  assert.match(rowSwitch(html, 'q'), /aria-label="Auto-merge for Fix &quot;a&quot; &amp; b"/);
+  assert.ok(html.includes('aria-label="Use auto-merge for all for Fix &quot;a&quot; &amp; b"'));
+  const long = 'x'.repeat(2000);
+  assert.ok((await body(bodyProps({ rows: [bulkRow('l', { title: long })] }))).includes(`aria-label="Auto-merge for ${long}"`));
+});
+
+test('AC08 without a repository no Auto-merge control or text shows, in any phase', async () => {
+  const results = { a: { status: 'started' }, b: { status: 'failed', message: 'x' } };
+  for (const patch of [{}, { phase: 'running', sent: ['a', 'b'], results: { a: { status: 'starting' } } }, { phase: 'done', sent: ['a', 'b'], results }]) {
+    const html = await body(bodyProps({ rows: ab, hasRepository: false, autoMergeOverrides: { b: false }, ...patch }));
+    assert.ok(!html.includes('Auto-merge for all'));
+    assert.doesNotMatch(html, /role="switch"/);
+    assert.doesNotMatch(html, /Auto-merge (on|off)/);
+  }
+});
+
+test('AC09 idle: an unchecked row\'s switch and "Same as all" are disabled, a checked row\'s are enabled, the common switch is enabled', async () => {
+  const html = await body(bodyProps({ rows: ab, checked: ['b'], autoMergeOverrides: { a: true, b: true } }));
+  assert.match(rowSwitch(html, 'a'), /disabled=""/);
+  assert.match(rowHtml(html, 'a'), /<button[^>]*disabled=""[^>]*>Same as all</);
+  assert.doesNotMatch(rowSwitch(html, 'b'), /disabled=""/);
+  assert.doesNotMatch(rowHtml(html, 'b'), /<button[^>]*disabled=""[^>]*>Same as all</);
+  assert.doesNotMatch(tagWithId(html, COMMON_SWITCH), /disabled=""/);
+});
+
+test('AC10 running: the common switch is disabled and rows show their value as text', async () => {
+  const html = await body(bodyProps({ rows: ab, phase: 'running', sent: ['a', 'b'], autoMergeOverrides: { b: false }, results: { a: { status: 'starting' }, b: { status: 'next' } } }));
+  assert.match(tagWithId(html, COMMON_SWITCH), /disabled=""/);
+  assert.equal((html.match(/role="switch"/g) ?? []).length, 1, 'only the common switch');
+  assert.match(rowHtml(html, 'a'), />Auto-merge on</);
+  assert.match(rowHtml(html, 'b'), />Auto-merge off \(chosen for this task\)</);
+});
+
+test('AC11 done: only a refused row gets its switch (and "Same as all") back; started and unselected rows show text', async () => {
+  const rows = [...ab, bulkRow('c', { title: 'Gamma' })];
+  const results = { a: { status: 'started' }, b: { status: 'failed', message: 'busy' } };
+  const html = await body(bodyProps({ rows, phase: 'done', checked: ['a', 'b'], sent: ['a', 'b'], results, autoMergeOverrides: { b: false } }));
+  assert.match(tagWithId(html, COMMON_SWITCH), /disabled=""/);
+  assert.doesNotMatch(rowSwitch(html, 'b'), /disabled=""/);
+  const sameAsAll = rowHtml(html, 'b').match(/<button[^>]*>Same as all<\/button>/)?.[0];
+  assert.ok(sameAsAll && !sameAsAll.includes('disabled=""'));
+  assert.equal(rowSwitch(html, 'a'), undefined);
+  assert.equal(rowSwitch(html, 'c'), undefined);
+  assert.match(rowHtml(html, 'a'), />Auto-merge on</);
+  assert.match(rowHtml(html, 'c'), />Auto-merge on</);
+});
+
+test('AC12 no usable agent: rows read "No agent" but keep their switch, and the common field shows', async () => {
+  const html = await body(bodyProps({ rows: ab, executors: [], commonId: '' }));
+  assert.ok(html.includes('No agent'));
+  assert.ok(rowSwitch(html, 'a') && rowSwitch(html, 'b'));
+  assert.ok(tagWithId(html, COMMON_SWITCH));
+});
+
+test('AC13 the new defaults note shows while idle and is gone after Start', async () => {
+  assert.ok((await body(bodyProps({ rows: ab }))).includes(DEFAULTS_NOTE));
+  assert.ok(!(await body(bodyProps({ rows: ab, phase: 'running', sent: ['a'], results: { a: { status: 'starting' } } }))).includes(DEFAULTS_NOTE));
+});
+
+test('AC14 a row locked for want of a default workflow has a disabled switch', async () => {
+  const html = await body(bodyProps({ rows: [bulkRow('l', { locked: true, workflowId: '' })] }));
+  assert.match(rowSwitch(html, 'l'), /disabled=""/);
+});
+
+test('AC15 the dialog sends what rowSendOptions reads from its latest choices, and the switches call their setters', () => {
+  const dialog = src('ui/project-popup/BulkStartDialog.tsx');
+  assert.match(dialog, /latest\.current = \{[^}]*autoMergeAll, autoMergeOverrides[^}]*\};/);
+  assert.match(dialog, /const current = latest\.current;\s*const \{ row, options \} = rowSendOptions\(current, id\);\s*const runId = await current\.start\(row, options\);/);
+  assert.match(dialog, /onChange=\{\(value\) => onAutoMergeOverride\(row\.id, value\)\}/);
+  assert.match(dialog, /onClick=\{\(\) => onChange\(null\)\}>Same as all</);
+  assert.match(dialog, /onAutoMergeAllChange=\{setAutoMergeAll\}/);
+  assert.match(dialog, /onAutoMergeOverride=\{\(id, value\) => setAutoMergeOverrides\(\(current\) => setAutoMergeOverride\(current, id, value\)\)\}/);
+});
+
+test('AC16 the spec and the known gaps describe the Auto-merge switches', () => {
+  const spec = readFileSync(new URL('../../docs/unified-planning-board.md', import.meta.url), 'utf8');
+  assert.match(spec, /\*\*Auto-merge for all\*\*/);
+  assert.doesNotMatch(spec, /its own Auto-merge setting/);
+  const testing = readFileSync(new URL('../../.docs/testing.md', import.meta.url), 'utf8');
+  assert.match(testing, /Auto-merge toggles \(task 38\.001\)/);
+});
+
+test('AC17 the task\'s saved Auto-merge is no longer read by bulk start', () => {
+  for (const path of ['lib/bulkStart.ts', 'ui/project-popup/BulkStartDialog.tsx']) {
+    const code = src(path);
+    assert.ok(!code.includes('row.autoMerge') && !code.includes('item?.autoMerge'), path);
+  }
 });

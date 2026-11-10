@@ -217,6 +217,37 @@ test('SI01 SI02 SU07 the session is a numbered read-only CLI session; with no ag
   assert.equal(terminal.starts.length, 3, 'no CLI for the deferred session');
 });
 
+test('IT02 IT03 IT04 both planning launches carry the interview, confirmation and checklist rules with an unchanged tool surface', async () => {
+  const terminal = fakeTerminalHost();
+  const manager = workerManagerModule.createWorkerManager({ terminalSessions: terminal.host });
+  const own = await h.projectService.createProject({ name: 'Planning interview launch', position: null });
+  const rules = [/Interview first\./, /one decision at a time/, /Confirm before filing\./, /explicit go-ahead/, /Specification completeness\./];
+
+  await manager.startTask({ projectId: own.id, description: 'Add a CSV export', executorId: 'test-claude-cli', kind: 'plan' });
+  const planning = terminal.starts[0]!;
+  assert.ok(planning.prompt.startsWith('Add a CSV export\n\n'), 'the user message comes first');
+  for (const rule of rules) assert.match(planning.prompt, rule);
+  assert.match(planning.prompt, /workflow, in this order: .+\. Write each task's specification so those steps have what they need to do their jobs\.$/, 'the workflow step list is still appended');
+  assert.deepEqual(planning.disallowedTools, planModule.PLAN_DISALLOWED_TOOLS);
+  const { PLAN_TASK_TOOLS } = await import('../src/terminal/planTaskTool.ts');
+  assert.deepEqual(PLAN_TASK_TOOLS, { create: 'create_task', list: 'list_tasks', update: 'update_task', delete: 'delete_task' });
+
+  await manager.startPlanAndBugsSession({ projectId: own.id, description: 'Export, and a crash', executorId: 'test-claude-cli' });
+  const combined = terminal.starts[1]!;
+  for (const rule of rules) assert.match(combined.prompt, rule);
+  assert.equal(combined.prompt, `Export, and a crash\n\n${bugReportTool.PLAN_AND_BUGS_INSTRUCTIONS}`);
+  assert.deepEqual(combined.mcpServers?.[0]?.tools, ['list_tasks', 'create_bug', 'update_bug', 'delete_bug', 'create_task', 'update_task', 'delete_task', 'reopen_bug', 'set_dependencies']);
+});
+
+test('IT06 filing a task or bug still needs no confirmation field: only the prompt changed', async () => {
+  const combined = await insertSession(project);
+  assert.equal((await fileTask(combined, 'Plain task')).status, 201);
+  assert.equal((await fileBug(combined, 'Plain bug')).status, 201);
+  const planning = await insertSession(project, { planningPurpose: undefined });
+  const created = await call('POST', `/api/agent-tasks?taskId=${planning.id}`, { title: 'Planned task', description: 'Brief' });
+  assert.ok(created.status === 200 || created.status === 201, `status ${created.status}`);
+});
+
 test('SI07 SU16 a follow-up keeps the kind; the finished notification names it', async () => {
   const terminal = fakeTerminalHost();
   const manager = workerManagerModule.createWorkerManager({ terminalSessions: terminal.host });
@@ -544,4 +575,60 @@ test('SI38 manual complete releases the session\'s ready tasks and standalone bu
   const released = await Promise.all([task, bug].map((item) => h.collections.planItemsDb.get(item.id)));
   for (const item of released) assert.equal(typeof item!.planningQueueOrder, 'number', `${item!.title} has a queue slot`);
   assert.ok(released.every((item) => item!.planningQueueOrder! > parentOrder), 'released after the session\'s own slot');
+});
+
+// ---- Task 38.002: "UI planning waits for parent" on set_dependencies ----
+
+test('38.002 I28 set_dependencies saves uiPlanningWaitsForParent; a non-boolean is 400, omitting it keeps the value, and the usual refusals hold', async () => {
+  const session = await insertSession(project);
+  const parent = (await fileTask(session, 'Parent')).body;
+  const child = (await fileTask(session, 'Child')).body;
+  const put = (body: unknown, auth: string | null = token, target = session) =>
+    call('PUT', `/api/agent-bugs/${encodeURIComponent(child.id)}/dependencies${query(target)}`, body, auth);
+  const on = await put({ dependsOn: [parent.id], uiPlanningWaitsForParent: true });
+  assert.equal(on.status, 200);
+  assert.equal(on.body.uiPlanningWaitsForParent, true);
+  const bad = await put({ dependsOn: [parent.id], uiPlanningWaitsForParent: 'yes' });
+  assert.equal(bad.status, 400);
+  assert.match(bad.body.error, /uiPlanningWaitsForParent/);
+  const kept = await put({ dependsOn: [parent.id] });
+  assert.equal(kept.status, 200);
+  assert.equal(kept.body.uiPlanningWaitsForParent, true, 'omitted keeps the stored value');
+  assert.equal((await put({ dependsOn: [parent.id], uiPlanningWaitsForParent: false }, 'wrong')).status, 401);
+  assert.equal((await put({ dependsOn: [parent.id], uiPlanningWaitsForParent: false }, token, await insertSession(project, { planningPurpose: undefined }))).status, 409, 'wrong session kind');
+  const other = await h.createProject('Plan and bugs waits other');
+  const foreign = await manualItem(other);
+  assert.equal((await call('PUT', `/api/agent-bugs/${encodeURIComponent(foreign.id)}/dependencies${query(session)}`, { dependsOn: [], uiPlanningWaitsForParent: true })).status, 404);
+});
+
+test('38.002 I30 the session instructions and relay scripts carry the setting', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const path = await import('node:path');
+  const plan = await import('../src/projects/plan.ts');
+  for (const text of [bugReportTool.PLAN_AND_BUGS_INSTRUCTIONS, plan.PLAN_INSTRUCTIONS]) {
+    assert.match(text, /uiPlanningWaitsForParent/);
+    assert.match(text, /off/);
+    assert.match(text, /on only when the (task|item)'s UI genuinely builds on or reuses UI that the parent introduces/);
+    assert.match(text, /confirm the value with the user for each dependent/);
+  }
+  const bin = path.join(import.meta.dirname, '..', 'bin');
+  assert.match(await readFile(path.join(bin, 'bug-report-mcp.mjs'), 'utf8'), /uiPlanningWaitsForParent: \{ type: 'boolean'/);
+  assert.match(await readFile(path.join(bin, 'plan-task-mcp.mjs'), 'utf8'), /const WAITS = \{ type: 'boolean'/);
+});
+
+test('38.002 I28 set_dependencies with [] and the setting refuses (409) without changing the parents', async () => {
+  const session = await insertSession(project);
+  const parent = (await fileTask(session, 'Parent')).body;
+  const child = (await fileTask(session, 'Child')).body;
+  const path = `/api/agent-bugs/${encodeURIComponent(child.id)}/dependencies${query(session)}`;
+  assert.equal((await call('PUT', path, { dependsOn: [parent.id] })).status, 200);
+  const refused = await call('PUT', path, { dependsOn: [], uiPlanningWaitsForParent: true });
+  assert.equal(refused.status, 409);
+  assert.match(refused.body.error, /no parent tasks/);
+  const stored = (await h.collections.planItemsDb.get(child.id))!;
+  assert.deepEqual(stored.dependsOn, [parent.id], 'the parents are unchanged');
+  assert.equal(stored.uiPlanningWaitsForParent, undefined);
+  const both = await call('PUT', path, { dependsOn: [parent.id], uiPlanningWaitsForParent: false });
+  assert.equal(both.status, 200);
+  assert.equal(both.body.uiPlanningWaitsForParent, false);
 });

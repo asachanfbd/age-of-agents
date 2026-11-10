@@ -37,6 +37,8 @@ export function setupStage(setup: Pick<TestingSetupState, 'run'>): SetupStage {
   const { run } = setup;
   if (!run) return 'queued';
   if (run.status === 'running') return run.currentStepId === SETUP_PROPOSAL_STEP_ID ? 'discovery' : 'implementing';
+  // A testing setup never runs early, so it is never held; read one as queued if it ever is.
+  if (run.status === 'held') return 'queued';
   return run.status;
 }
 

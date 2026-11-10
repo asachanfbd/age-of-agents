@@ -26,6 +26,7 @@ let workerManagerModule: typeof import('../src/worker/workerManager.ts');
 let collections: typeof import('../src/db/collections.ts');
 let notificationService: typeof import('../src/notifications/notificationService.ts');
 let testingConfig: typeof import('../src/testing/config.ts');
+let defaultExecutorStore: typeof import('../src/executors/defaultExecutorInstance.ts')['defaultExecutorStore'];
 
 before(async () => {
   tempRoot = await mkdtemp(path.join(tmpdir(), 'testing-setup-test-'));
@@ -42,6 +43,7 @@ before(async () => {
   collections = await import('../src/db/collections.ts');
   notificationService = await import('../src/notifications/notificationService.ts');
   testingConfig = await import('../src/testing/config.ts');
+  ({ defaultExecutorStore } = await import('../src/executors/defaultExecutorInstance.ts'));
 });
 
 after(async () => {
@@ -404,6 +406,103 @@ test('repair: an invalid config gives "Repair testing" and the proposal prompt c
   assert.deepEqual(result.planItem.testingSetup, { mode: 'repair' });
   assert.match(starts[0]!.prompt, /suites\[0\]\.primaryActionId \[missing-primary-action\]/);
   await manager.stopWorkflowRun(result.run!.id);
+});
+
+// ---- Bug 19.001.001: a run with no agent choice uses the owner's selected default ----
+
+const AGENT_A = 'test-claude-cli';
+const AGENT_B = 'test-claude-cli-alt';
+
+/** Runs `fn` with `executorId` stored as the owner's default coding agent, clearing it afterwards. */
+async function withStoredDefault<T>(executorId: string, fn: () => Promise<T>): Promise<T> {
+  await defaultExecutorStore.set({ executorId, label: executorId });
+  try {
+    return await fn();
+  } finally {
+    await defaultExecutorStore.clear();
+  }
+}
+
+const SETUP_MODES: { mode: string; prepare: (dir: string) => Promise<void> }[] = [
+  { mode: 'setup', prepare: async () => {} },
+  { mode: 'reconfigure', prepare: (dir) => writeConfig(dir, VALID_CONFIG) },
+  { mode: 'repair', prepare: (dir) => writeConfig(dir, { schemaVersion: 1, suites: 'broken' }) },
+];
+
+for (const { mode, prepare } of SETUP_MODES) {
+  test(`${mode}: with no agent chosen, testing setup starts on the selected default agent, not the first configured one`, async () => {
+    const project = await newProject(`Setup Default ${mode}`);
+    await prepare(projectService.projectAbsolutePath(project));
+    const { manager, starts } = scriptedManager();
+    await withStoredDefault(AGENT_B, async () => {
+      const result = await settledSetup(manager)(project.id);
+      assert.equal(result.planItem.testingSetup?.mode, mode);
+      assert.equal(result.run?.executorId, AGENT_B);
+      assert.equal((await manager.getTask(starts[0]!.taskId)).executorId, AGENT_B, 'its step task runs on the default too');
+      await manager.stopWorkflowRun(result.run!.id);
+    });
+  });
+}
+
+test('an explicit agent in the testing-setup request still wins over the selected default', async () => {
+  const project = await newProject('Setup Explicit Agent');
+  const { manager } = scriptedManager();
+  await withStoredDefault(AGENT_B, async () => {
+    const result = await settledSetup(manager)(project.id, { executorId: AGENT_A });
+    assert.equal(result.run?.executorId, AGENT_A);
+    await manager.stopWorkflowRun(result.run!.id);
+  });
+});
+
+test('a stored default that was removed falls back to the first configured CLI agent without failing the start', async () => {
+  const project = await newProject('Setup Removed Default');
+  const { manager } = scriptedManager();
+  await withStoredDefault('agent-that-was-removed', async () => {
+    const result = await settledSetup(manager)(project.id);
+    assert.equal(result.run?.executorId, AGENT_A);
+    await manager.stopWorkflowRun(result.run!.id);
+  });
+});
+
+test('with no default stored, testing setup starts on the first configured CLI agent', async () => {
+  const project = await newProject('Setup No Default');
+  const { manager } = scriptedManager();
+  const result = await settledSetup(manager)(project.id);
+  assert.equal(result.run?.executorId, AGENT_A);
+  await manager.stopWorkflowRun(result.run!.id);
+});
+
+test('a later step whose run agent was removed falls back to the selected default agent', async () => {
+  const { manager, starts, runId } = await setupAtGate('Setup Step Fallback');
+  assert.equal((await manager.getWorkflowRun(runId))?.executorId, AGENT_A);
+  await collections.workflowRunsDb.update(runId, { executorId: 'agent-that-was-removed' });
+  await withStoredDefault(AGENT_B, async () => {
+    await manager.approveTestingSetup(runId, 1);
+    await waitUntil(async () => (await startsForStep(manager, starts, setup.SETUP_IMPLEMENTATION_STEP_ID)).length === 1);
+    const [implementation] = await startsForStep(manager, starts, setup.SETUP_IMPLEMENTATION_STEP_ID);
+    assert.equal((await manager.getTask(implementation!.taskId)).executorId, AGENT_B);
+    await manager.stopWorkflowRun(runId);
+  });
+});
+
+test('a queued testing setup uses the default in force when it actually starts', async () => {
+  const project = await newProject('Setup Queued Default');
+  const { manager, starts, actions } = scriptedManager();
+  const busy = await planItemService.createPlanItem({ projectId: project.id, title: 'Busy work', description: 'x' });
+  await settledExecute(manager)(busy.id);
+  const result = await settledSetup(manager)(project.id);
+  assert.ok(result.queueEntry, 'the setup queued behind the busy item');
+  assert.equal(result.queueEntry.executorId ?? undefined, undefined, 'the queue entry pins no agent');
+
+  await withStoredDefault(AGENT_B, async () => {
+    actions.development = (taskId) => manager.completeStep(taskId, { summary: 'done' });
+    const busyTask = (await manager.listTasksForProject(project.id)).find((t) => t.planItemId === busy.id)!;
+    await manager.completeStep(busyTask.id, { summary: 'done' });
+    await waitUntil(async () => (await startsForStep(manager, starts, setup.SETUP_PROPOSAL_STEP_ID)).length === 1);
+    const runId = (await planItemService.getPlanItem(result.planItem.id)).workflowRunId!;
+    assert.equal((await manager.getWorkflowRun(runId))?.executorId, AGENT_B);
+    await manager.stopWorkflowRun(runId);
+  });
 });
 
 // ---- Read-only discovery, for both executor families ----

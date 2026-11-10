@@ -117,7 +117,7 @@ export async function createPlanItem(input: {
 
 export async function updatePlanItem(
   id: string,
-  patch: Partial<Pick<PlanItemRecord, 'title' | 'description' | 'order' | 'planningQueueOrder' | 'status' | 'taskIds' | 'executorId' | 'workflowRunId' | 'planningTaskId' | 'archived' | 'bug' | 'relatedBug' | 'dependsOn' | 'waiting' | 'stepNotes'>>,
+  patch: Partial<Pick<PlanItemRecord, 'title' | 'description' | 'order' | 'planningQueueOrder' | 'status' | 'taskIds' | 'executorId' | 'workflowRunId' | 'planningTaskId' | 'archived' | 'bug' | 'relatedBug' | 'dependsOn' | 'waiting' | 'stepNotes' | 'uiPlanningWaitsForParent'>>,
 ): Promise<PlanItemRecord> {
   const updated = await planItemsDb.update(id, { ...patch, updatedAt: new Date().toISOString() });
   if (!updated) throw new PlanItemNotFoundError();
@@ -202,12 +202,13 @@ async function requireProjectItem(projectId: string, id: string): Promise<PlanIt
  * prefix whatever title it's given. A completed item is refused (PlanItemCompletedError): it stays
  * done and listed under Completed, so reworking it into new work would hide that work from the open list.
  */
-export async function editPlanningPlanItem(projectId: string, id: string, patch: { title?: string; description?: string }): Promise<PlanItemRecord> {
+export async function editPlanningPlanItem(projectId: string, id: string, patch: { title?: string; description?: string; uiPlanningWaitsForParent?: boolean }): Promise<PlanItemRecord> {
   const item = await requireProjectItem(projectId, id);
   if (item.status === 'done') throw new PlanItemCompletedError(item);
-  const changes: Partial<Pick<PlanItemRecord, 'title' | 'description'>> = {};
+  const changes: Partial<Pick<PlanItemRecord, 'title' | 'description' | 'uiPlanningWaitsForParent'>> = {};
   if (patch.title !== undefined) changes.title = item.planningRef ? planningTaskTitle(item.planningRef, patch.title) : patch.title;
   if (patch.description !== undefined) changes.description = patch.description;
+  if (patch.uiPlanningWaitsForParent !== undefined) changes.uiPlanningWaitsForParent = patch.uiPlanningWaitsForParent;
   return updatePlanItem(id, changes);
 }
 

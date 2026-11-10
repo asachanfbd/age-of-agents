@@ -8,6 +8,10 @@ import { ACTION_LABELS, dependsOnSection, waitingView } from '../../lib/dependen
 import type { PickerOption, WaitingView } from '../../lib/dependencies';
 import { KindTag, ParentOptionGroups, StateBadge } from './ParentOptionGroups';
 import { useWorldStore } from '../../store/worldStore';
+import {
+  CANCEL_AND_DISCARD_LABEL, CANCEL_CONFIRM_TEXT, earlyPhaseLine, earlyPhaseOf, earlyWaitingActions, KEEP_WAITING_LABEL, REVIEW_UI_PLAN_LABEL,
+} from '../../lib/earlyUiPlanning';
+import { UiPlanningWaitsSwitch } from './UiPlanningWaitsSwitch';
 import type { DependencyReasonData, PlanItemData } from '../../types';
 
 const EMPTY_ITEMS: PlanItemData[] = [];
@@ -45,15 +49,45 @@ function ReasonLine({ item, reason }: { item: PlanItemData; reason: DependencyRe
   );
 }
 
-/** The live waiting state of a started-but-waiting task: its badge, why, and Cancel waiting. */
+/**
+ * The live waiting state of a started-but-waiting task: its badge, how far an early UI Planning has got, why it
+ * waits, and Cancel waiting — which asks first once a UI plan exists, since cancelling discards it.
+ */
 export function WaitingPanel({ item, view }: { item: PlanItemData; view: WaitingView }) {
   const cancelWaiting = useWorldStore((s) => s.cancelWaiting);
+  const openCardDetail = useWorldStore((s) => s.openWorkspaceCardDetail);
+  const run = useWorldStore((s) => (item.workflowRunId ? s.workflowRunsByProject[item.projectId]?.find((entry) => entry.id === item.workflowRunId) : undefined));
+  const queue = useWorldStore((s) => s.planItemQueueByProject[item.projectId]);
+  const [confirming, setConfirming] = useState(false);
+  const phase = earlyPhaseOf(item, run, queue);
+  const phaseLine = earlyPhaseLine(phase);
+  const actions = earlyWaitingActions(phase);
+  const openRun = () => { if (item.workflowRunId) openCardDetail(item.projectId, { kind: 'run', id: item.workflowRunId }); };
+  const cancel = () => { setConfirming(false); void cancelWaiting(item.projectId, item.id); };
   return (
     <div className="grid gap-1.5 rounded-md border px-3 py-2" data-waiting-panel={view.kind}>
-      <div className="flex items-center justify-between gap-2">
-        <Badge variant={view.kind === 'blocked' ? 'soft-destructive' : 'warning'}>{view.badge}</Badge>
-        {view.canCancel && <Button type="button" variant="outline" size="sm" onClick={() => void cancelWaiting(item.projectId, item.id)}>Cancel waiting</Button>}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="flex min-w-0 flex-wrap items-center gap-2">
+          <Badge variant={view.kind === 'blocked' ? 'soft-destructive' : 'warning'}>{view.badge}</Badge>
+          {phaseLine && <span className="text-xs font-medium" data-early-phase>{phaseLine}</span>}
+          {actions.openRun && <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={openRun}>Open run</Button>}
+        </span>
+        {!confirming && (
+          <span className="flex gap-2">
+            {actions.reviewUiPlan && <Button type="button" size="sm" onClick={openRun}>{REVIEW_UI_PLAN_LABEL}</Button>}
+            {view.canCancel && <Button type="button" variant="outline" size="sm" onClick={() => (actions.confirmCancel ? setConfirming(true) : cancel())}>Cancel waiting</Button>}
+          </span>
+        )}
       </div>
+      {confirming && (
+        <div role="group" aria-label="Confirm cancel waiting" className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted/50 px-2 py-1.5" data-cancel-confirm>
+          <span className="text-xs">{CANCEL_CONFIRM_TEXT}</span>
+          <span className="flex gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => setConfirming(false)}>{KEEP_WAITING_LABEL}</Button>
+            <Button type="button" variant="destructive" size="sm" onClick={cancel}>{CANCEL_AND_DISCARD_LABEL}</Button>
+          </span>
+        </div>
+      )}
       <ul className="grid gap-1">{view.reasons.map((reason) => <ReasonLine key={`${reason.parentId ?? 'start'}:${reason.text}`} item={item} reason={reason} />)}</ul>
     </div>
   );
@@ -123,6 +157,7 @@ export function DependsOnSection({ item }: { item: PlanItemData }) {
           <Button type="button" size="sm" variant="outline" disabled={!choice} onClick={() => { void setDependencies(item.projectId, item.id, [...current, choice]); setChoice(''); }}>Add</Button>
         </div>
       )}
+      <UiPlanningWaitsSwitch item={item} surface="detail" />
       {waiting && <WaitingPanel item={item} view={waiting} />}
     </section>
   );

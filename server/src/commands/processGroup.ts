@@ -45,3 +45,19 @@ export function spawnInProcessGroup(command: string, options: { cwd: string; env
     },
   };
 }
+
+/**
+ * Signals the process group led by `pid` (a PTY child is its own session and group leader) with
+ * SIGTERM, then SIGKILL after STOP_GRACE_MS, so background children a finished CLI session started,
+ * such as a dev server, don't outlive it. Safe when the group is already gone.
+ * The delayed SIGKILL may target a group id the OS has reused after the leader exited; that needs a
+ * new group with the same id within STOP_GRACE_MS, which is accepted as vanishingly unlikely.
+ */
+export function terminateProcessGroup(pid: number): void {
+  if (process.platform === 'win32') return;
+  const signal = (name: NodeJS.Signals) => {
+    try { process.kill(-pid, name); } catch { /* Already gone. */ }
+  };
+  signal('SIGTERM');
+  setTimeout(() => signal('SIGKILL'), STOP_GRACE_MS).unref();
+}

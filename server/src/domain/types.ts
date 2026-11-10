@@ -242,7 +242,7 @@ export interface TaskRecord {
   /** The CLI conversation id, assigned before Claude starts or discovered from Codex output. */
   sessionId: string | null;
   /** Settings captured on the first CLI launch so resumed conversations retain their original instructions and permissions. */
-  sessionSetup?: { systemPrompt: string; readOnly: boolean; disallowedTools?: string[]; testing: boolean; canRunCommands?: boolean };
+  sessionSetup?: { systemPrompt: string; readOnly: boolean; disallowedTools?: string[]; testing: boolean; canRunCommands?: boolean; browser?: boolean };
   /** Executable and account environment used for the original CLI conversation. */
   sessionExecutor?: { kind: 'claude-cli' | 'codex-cli'; bin: string; env: Record<string, string> };
   /** Live PTY/turn state. Present only for interactive terminal Tasks. */
@@ -435,8 +435,14 @@ export interface PlanItemRecord {
   pullRequest?: TaskPullRequestReading;
   /** Other tasks of the same project this task waits for: it starts only once each parent's work is in the checked-out branch (see projects/dependencies.ts). Absent reads as none. */
   dependsOn?: string[];
-  /** Present while the person asked to start this task and it is waiting for its parents; the task stays in Planning until its run is accepted. */
+  /**
+   * Present while the person asked to start this task and it is waiting for its parents. Without an
+   * early run the task stays in Planning until its run is accepted; with one (see
+   * `WorkflowRunRecord.early`) the run exists and only its first UI Planning step may run.
+   */
   waiting?: PlanItemWaiting;
+  /** "UI planning waits for parent": on, nothing runs until the parents are merged; off (absent reads as off), a waiting task's UI Planning runs early (see projects/dependencies.ts's `wantsEarlyRun`). */
+  uiPlanningWaitsForParent?: boolean;
   /** Set only on the PlanItem a scheduled job's run created (see scheduler/runStarter.ts). Such an item starts beside the Planning queue and never holds it. */
   scheduledJobId?: string;
   /** Hidden from every Tasks-board column (Completed included) — set via `PATCH /api/plan-items/:id {archived}`. Absent means not archived. */
@@ -585,6 +591,10 @@ export interface PlanItemQueueEntry {
   createBranch?: boolean;
   /** The steps the Start task dialog left out, kept as chosen until this entry starts. Absent on entries queued before step selection existed; read as none. */
   skippedStepIds?: string[];
+  /** The start is a waiting task's early UI Planning run (see StartPlanItemOptions.early); it starts as a normal run when the task no longer waits by then. */
+  early?: boolean;
+  /** Continues this held run (its next step, or a queued UI Planning revision) instead of starting a new one. */
+  resumeRunId?: string;
   /** Where this entry runs in its Project's queue — lower starts sooner. Absent on entries that predate reordering; read those as 0. */
   position?: number;
   createdAt: string;
@@ -1110,6 +1120,8 @@ export interface WorkflowStep extends WorkflowAgentConfig {
   canEditCode: boolean;
   /** Whether a read-only step may run shell commands (install dependencies, run tests, build) and use the testing tools. It still gets no file-editing tools and is never committed; absent reads as off, and a step with `canEditCode` gains nothing from it. */
   canRunCommands?: boolean;
+  /** Whether the step gets a headless browser (Playwright MCP) to check the running app. It needs a shell to start the app, so it requires `canEditCode` or `canRunCommands`; absent reads as off. */
+  canUseBrowser?: boolean;
   /** Whether this step pauses the run for a human decision (`awaiting-approval`) instead of advancing straight to the next step. */
   requiresApproval: boolean;
   /**
@@ -1130,7 +1142,13 @@ export interface WorkflowStep extends WorkflowAgentConfig {
   requestChangesToStepId?: string | null;
   /** What this step's detail in the run view offers as a Quick look at the task's work in progress. Absent or null reads as `'none'`. */
   quickLook?: QuickLookKind | null;
+  /** When set, `complete_step` is refused until it carries at least one real output of this format (see worker/requiredOutputs.ts). Absent or null leaves outputs optional; `skip_step` is never affected. */
+  requiredOutputFormat?: RequiredOutputFormat | null;
 }
+
+/** The output formats a WorkflowStep can require `complete_step` to carry — today only an HTML mockup. */
+export const REQUIRED_OUTPUT_FORMATS = ['html'] as const;
+export type RequiredOutputFormat = typeof REQUIRED_OUTPUT_FORMATS[number];
 
 /**
  * A WorkflowStep's Quick look: a live, read-only view of the run's working directory in the run
@@ -1176,7 +1194,24 @@ export interface RunStartup {
   reuseBranch: boolean;
 }
 
-export type WorkflowRunStatus = 'starting' | 'running' | 'awaiting-approval' | 'needs-attention' | 'completing' | 'completed' | 'failed' | 'stopped';
+/** `held`: an early run whose UI Planning is done (approved or skipped) or whose revision round waits for a slot; it holds no slot and continues only through the dependency service or the queue. */
+export type WorkflowRunStatus = 'starting' | 'running' | 'held' | 'awaiting-approval' | 'needs-attention' | 'completing' | 'completed' | 'failed' | 'stopped';
+
+/**
+ * Set on a waiting task's early run: only `stepId` (the workflow's first, manual-approval UI Planning
+ * step) runs before the parents are merged. Cleared when the run continues past that step.
+ */
+export interface WorkflowRunEarly {
+  stepId: string;
+  /** How many Request changes rounds the early step has had; the phase reads "revising" while one runs. */
+  revisions: number;
+  /** The early step was skipped (no UI surface): no approval was asked and no phase is shown. */
+  skipped?: boolean;
+  /** The parents are merged and the run waits in the slot queue for its next step. */
+  released?: boolean;
+  /** A Request changes round that waits in the slot queue: the message it starts with. */
+  pendingRevision?: { message: string };
+}
 
 /**
  * One run of a Workflow against one PlanItem — created by `workerManager.ts`'s `executePlanItem`
@@ -1231,6 +1266,8 @@ export interface WorkflowRunRecord {
    * starts, pauses on or loops back to one of them. Absent on runs started before this existed; read as none.
    */
   skippedStepIds?: string[];
+  /** Set only on a waiting task's early UI Planning run — see WorkflowRunEarly. */
+  early?: WorkflowRunEarly;
   /**
    * Set only on a run that re-runs a completed bug after a reported regression. `roundOffsets` maps a
    * step id to the highest round that step reached in the bug's earlier runs, so this run's round 1 of

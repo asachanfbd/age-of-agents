@@ -1,10 +1,11 @@
 import { isBugItem, startWorkflowChoice } from './bugs';
 import { dependencyLabel } from './dependencies';
 import type { StartConfirmParent } from './dependencies';
+import { bulkEarlyNote, uiPlansComing } from './earlyUiPlanning';
 import { isExecutorAvailable } from './executorAvailability';
 import { pendingTaskRows } from './projectTasks';
 import type { PlanningQueueEntry } from './projectTasks';
-import type { ExecutorProfile, PlanItemQueueEntry } from './serverApi';
+import type { ExecutePlanItemOptions, ExecutorProfile, PlanItemQueueEntry } from './serverApi';
 import { startOptions } from './startTaskDialog';
 import { plural } from './text';
 import { queuePlaces } from './waitingList';
@@ -31,8 +32,10 @@ export interface BulkRow {
   workflowId: string;
   /** Workflows are enabled but none is the default for this card: it cannot start from here and is never sent. */
   locked: boolean;
-  /** The task's own Auto-merge setting, which its start keeps. */
-  autoMerge: boolean;
+  /** Its stored "UI planning waits for parent", which the row's switch opens in. */
+  uiPlanningWaitsForParent: boolean;
+  /** Its workflow starts with the UI Planning step that can run before the parents are merged. */
+  earlyStep: boolean;
 }
 
 /** What the single Start task dialog preselects a workflow from (`startWorkflowChoice`). */
@@ -40,10 +43,12 @@ export interface WorkflowDefaults {
   projectDefaultId: string;
   enabledIds: string[];
   bugWorkflowId: string;
+  /** The enabled workflows that start with an early UI Planning step. */
+  earlyStepWorkflowIds?: string[];
 }
 
 export const NO_WORKFLOW_NOTE = 'No default workflow · open the task to choose one';
-export const DEFAULTS_NOTE = 'Each task starts with its default workflow and options. Open a task to change them.';
+export const DEFAULTS_NOTE = 'Each task runs its default workflow with every step. Open a task to change them.';
 export const PLAY_BUTTON_LABEL = 'Start pending tasks';
 export const NOTHING_TO_START = 'No pending task can be started from this column';
 
@@ -66,7 +71,8 @@ export function buildBulkRows(queue: readonly PlanningQueueEntry[], items: reado
         hasParents: !!item?.dependsOn?.length,
         workflowId,
         locked: defaults.enabledIds.length > 0 && !workflowId,
-        autoMerge: item?.autoMerge?.enabled === true,
+        uiPlanningWaitsForParent: item?.uiPlanningWaitsForParent === true,
+        earlyStep: !!workflowId && (defaults.earlyStepWorkflowIds ?? []).includes(workflowId),
       };
     });
 }
@@ -147,11 +153,75 @@ export function lockedAgentLabel(executors: readonly ExecutorProfile[], commonId
   return agentName(executors, commonId) || 'No agent';
 }
 
+// ---- Auto-merge ----
+
+/** "Auto-merge for all" on every open; a task's own saved setting is not the default here. */
+export const AUTO_MERGE_ALL_DEFAULT = true;
+
+/** Sets or clears (null, "Same as all") one row's own Auto-merge. A value equal to the common one stays an override. */
+export function setAutoMergeOverride(overrides: Readonly<Record<string, boolean>>, rowId: string, value: boolean | null): Record<string, boolean> {
+  const next = { ...overrides };
+  if (value === null) delete next[rowId];
+  else next[rowId] = value;
+  return next;
+}
+
+/** The Auto-merge a row starts with: its own while set, else the common switch. */
+export const rowAutoMerge = (common: boolean, override: boolean | undefined): boolean => override ?? common;
+
+/** A row's Auto-merge as plain text once its switch is locked: "Auto-merge off (chosen for this task)" for its own value. */
+export function lockedAutoMergeLabel(common: boolean, override: boolean | undefined): string {
+  const text = `Auto-merge ${rowAutoMerge(common, override) ? 'on' : 'off'}`;
+  return override === undefined ? text : `${text} (chosen for this task)`;
+}
+
 // ---- Start options and footer ----
 
-/** The options one row starts with: exactly what the single Start task dialog preselects for it, with every step. */
-export function rowStartOptions(row: Pick<BulkRow, 'workflowId' | 'autoMerge'>, executorId: string, hasRepository: boolean): ReturnType<typeof startOptions> {
-  return startOptions({ executorId, createBranch: hasRepository, hasRepository, autoMerge: row.autoMerge, workflowId: row.workflowId, skippedStepIds: [] });
+/**
+ * The options one row starts with: its workflow as the single Start task dialog preselects it, every
+ * step, and the agent and Auto-merge chosen in this dialog, plus the row's "UI planning waits for parent"
+ * for a task with parents. Auto-merge is sent only with a repository.
+ */
+export function rowStartOptions(
+  row: Pick<BulkRow, 'workflowId' | 'hasParents'>, executorId: string, autoMerge: boolean, hasRepository: boolean, uiPlanningWaitsForParent = false,
+): ReturnType<typeof startOptions> & { uiPlanningWaitsForParent?: boolean } {
+  const options = startOptions({ executorId, createBranch: hasRepository, hasRepository, autoMerge, workflowId: row.workflowId, skippedStepIds: [] });
+  return row.hasParents ? { ...options, uiPlanningWaitsForParent } : options;
+}
+
+/** Whether a row's start runs UI Planning now: it waits for parents, its workflow has the step, and its switch is off. */
+export const rowRunsEarly = (row: Pick<BulkRow, 'earlyStep'>, waits: boolean, waitingParents: readonly unknown[] | undefined): boolean =>
+  row.earlyStep && !waits && !!waitingParents?.length;
+
+/** The note under the defaults note, counting the checked rows that run UI Planning now. */
+export function bulkEarlyRowsNote(
+  rows: readonly BulkRow[], checked: readonly string[], waits: Readonly<Record<string, boolean>>, parents: Readonly<Record<string, readonly unknown[]>>,
+): string | null {
+  return bulkEarlyNote(checkedRows(rows, checked).filter((row) => rowRunsEarly(row, waits[row.id] ?? row.uiPlanningWaitsForParent, parents[row.id])).length);
+}
+
+/** The dialog's choices at the moment a start is sent. */
+export interface BulkSendSnapshot {
+  shown: readonly BulkRow[];
+  overrides: Readonly<Record<string, string>>;
+  commonId: string;
+  executors: readonly ExecutorProfile[];
+  now: number;
+  hasRepository: boolean;
+  autoMergeAll: boolean;
+  autoMergeOverrides: Readonly<Record<string, boolean>>;
+  /** Rows whose "UI planning waits for parent" was changed in the dialog; the others keep their stored value. */
+  waits?: Readonly<Record<string, boolean>>;
+}
+
+/** One listed row and the options its start sends, read from the latest choices, so a retry uses what the row shows now. */
+export function rowSendOptions(snapshot: BulkSendSnapshot, id: string): { row: BulkRow; options: ExecutePlanItemOptions } {
+  const row = snapshot.shown.find((candidate) => candidate.id === id);
+  if (!row) throw new Error(`Row ${id} is not listed.`);
+  const agent = rowAgentId(snapshot.executors, snapshot.commonId, snapshot.overrides[id], snapshot.now);
+  const autoMerge = rowAutoMerge(snapshot.autoMergeAll, snapshot.autoMergeOverrides[id]);
+  const waits = snapshot.waits?.[id] ?? row.uiPlanningWaitsForParent;
+  return { row, options: rowStartOptions(row, agent, autoMerge, snapshot.hasRepository, waits) };
 }
 
 export const startButtonLabel = (count: number): string => (count === 0 ? 'Start tasks' : `Start ${plural(count, 'task')}`);
@@ -178,14 +248,21 @@ export type RowResult =
   | { status: 'starting' }
   | { status: 'started' }
   | { status: 'queued'; position: number }
-  | { status: 'waiting' }
+  /** Waits for its parents; `early` when its UI Planning runs now, with its place while that waits for a slot. */
+  | { status: 'waiting'; early?: { place: number | null } }
   | { status: 'failed'; message: string };
 
-/** What an accepted start did: a run id means it started; otherwise it joined the waiting list (with its Project-wide place) or waits for its parents. */
-export function classifyStart(runId: string, queue: readonly PlanItemQueueEntry[] | undefined, itemId: string): RowResult {
+/**
+ * What an accepted start did: a run id means it started; otherwise it joined the waiting list (with its Project-wide place)
+ * or waits for its parents — running its UI Planning now (`early`), or in line for a slot to do so.
+ */
+export function classifyStart(runId: string, queue: readonly PlanItemQueueEntry[] | undefined, itemId: string, early = false): RowResult {
   if (runId) return { status: 'started' };
   const place = queuePlaces(queue).get(itemId);
-  return place ? { status: 'queued', position: place.position } : { status: 'waiting' };
+  const earlyEntry = queue?.some((entry) => entry.planItemId === itemId && entry.early);
+  if (earlyEntry) return { status: 'waiting', early: { place: place?.position ?? null } };
+  if (place) return { status: 'queued', position: place.position };
+  return early ? { status: 'waiting', early: { place: null } } : { status: 'waiting' };
 }
 
 /** A refused start's row text: the daemon's reason. */
@@ -200,21 +277,29 @@ export function rowStatusText(result: RowResult | undefined): string | null {
     case 'starting': return 'Starting…';
     case 'started': return '✓ Started';
     case 'queued': return `Queued (position ${result.position})`;
-    case 'waiting': return 'Waiting · starts by itself once its parents are merged';
+    case 'waiting':
+      if (!result.early) return 'Waiting · starts by itself once its parents are merged';
+      return result.early.place === null
+        ? 'Waiting · UI Planning runs now; later steps start once its parents are merged'
+        : `Waiting · UI Planning is in line for a free slot (#${result.early.place}); later steps start once its parents are merged`;
     case 'failed': return `✕ Not started: ${result.message}`;
     default: return null;
   }
 }
 
-/** "2 started · 1 queued · 2 waiting for parents · 1 not started", leaving out what is zero. */
+/** "2 started · 1 queued · 2 waiting for parents · 1 not started · 2 UI plans coming for approval", leaving out what is zero. */
 export function summaryLine(results: Readonly<Record<string, RowResult>>): string {
   const count = (status: RowResult['status']) => Object.values(results).filter((result) => result.status === status).length;
+  const early = Object.values(results).filter((result) => result.status === 'waiting' && result.early).length;
   return [
-    [count('started'), 'started'],
-    [count('queued'), 'queued'],
-    [count('waiting'), 'waiting for parents'],
-    [count('failed'), 'not started'],
-  ].filter(([n]) => (n as number) > 0).map(([n, words]) => `${n} ${words}`).join(' · ');
+    ...[
+      [count('started'), 'started'],
+      [count('queued'), 'queued'],
+      [count('waiting'), 'waiting for parents'],
+      [count('failed'), 'not started'],
+    ].filter(([n]) => (n as number) > 0).map(([n, words]) => `${n} ${words}`),
+    ...(uiPlansComing(early) ? [uiPlansComing(early)!] : []),
+  ].join(' · ');
 }
 
 /** "Starting 3 of 6…" while a batch runs; null when nothing is being sent. */
@@ -227,7 +312,7 @@ export function progressLine(sent: readonly string[], results: Readonly<Record<s
 export const failedIds = (rows: readonly BulkRow[], results: Readonly<Record<string, RowResult>>): string[] =>
   rows.filter((row) => results[row.id]?.status === 'failed').map((row) => row.id);
 
-/** Before a batch, a checked row's picker is editable; after one, only a refused row's is, so Retry can use another agent. */
+/** Before a batch, a checked row's picker and Auto-merge switch are editable; after one, only a refused row's are, so Retry can use other choices. */
 export function rowPickerEnabled(input: { phase: BulkPhase; checked: boolean; result: RowResult | undefined }): boolean {
   if (input.phase === 'idle') return input.checked;
   return input.phase === 'done' && input.result?.status === 'failed';

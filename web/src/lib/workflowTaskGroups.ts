@@ -3,6 +3,7 @@ import { autoMergeHoldOf, completedAutoMergeHold } from './autoMerge';
 import type { Attention, OpenTaskRow } from './projectTasks';
 import { taskPrView } from './taskPullRequest';
 import { startupCardProgress } from './runStartup';
+import { earlyPhaseOf } from './earlyUiPlanning';
 import { stepCardProgress } from './taskBoard';
 import type { PlanItemQueueEntry, WorkflowRunRecord } from './serverApi';
 import type { PlanItemData, TaskData } from '../types';
@@ -14,7 +15,7 @@ import type { PlanItemData, TaskData } from '../types';
  * blocked Task waiting on an answer, the pre-workflow case `openState`/`openAttention` already handled;
  * rows whose run is actively `starting`/`running`/`completing`, or that have no run but whose Task is
  * executing (no step progress to show); started tasks waiting for their parents
- * (`row.waiting`, which have no run yet) in their own `waiting` group, which the board shows in its Running column
+ * (`row.waiting`, with no run yet or a `held` early run) in their own `waiting` group, which the board shows in its Running column
  * but which is not live work (see `isBlockedWaiting`); and everything else (the board's Planning column). A
  * row is matched to its run by id within the *project's* run list (`workflowRunsByProject[projectId]`)
  * — a project can have many runs across many plan items, so this never just grabs "the project's runs"
@@ -49,8 +50,10 @@ export function buildTaskGroups(input: {
   const waiting: OpenTaskRow[] = [];
   const open: OpenTaskRow[] = [];
 
-  for (const row of rows) {
-    const run = findWorkflowRun(row, runsForProject);
+  for (const listed of rows) {
+    const run = findWorkflowRun(listed, runsForProject);
+    const earlyPhase = earlyPhaseOf(listed, run, input.queue);
+    const row: OpenTaskRow = earlyPhase ? { ...listed, earlyPhase } : listed;
     const held = heldOf(itemsById.get(row.id)!);
     if (held) {
       // Finished, so nothing to start, pause, edit or complete; only opening it and archiving apply.
@@ -68,6 +71,8 @@ export function buildTaskGroups(input: {
       else if (run.status === 'awaiting-approval' || run.status === 'needs-attention' || run.status === 'failed') needsYou.push(startupCardProgress(run) ? { ...row, progress: startupCardProgress(run) } : row);
       else if (run.status === 'starting') running.push({ ...row, progress: startupCardProgress(run) });
       else if (run.status === 'running' || run.status === 'completing') running.push({ ...row, progress: stepCardProgress(run) });
+      // An early run after its UI Planning: it waits for the parents (or a slot), like a task with no run yet.
+      else if (run.status === 'held') waiting.push(row);
       else open.push(row);
     } else if (row.attention === 'input') {
       needsYou.push(row);

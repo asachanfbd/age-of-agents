@@ -427,6 +427,8 @@ export interface PlanItem {
   dependsOn?: string[];
   /** Present while the task waits for its parents. */
   waiting?: WaitingData;
+  /** "UI planning waits for parent"; absent reads as off. */
+  uiPlanningWaitsForParent?: boolean;
   /** Hidden from every Tasks-board column (Completed included). Absent means not archived. */
   archived?: boolean;
   createdAt: string;
@@ -461,6 +463,10 @@ export interface PlanItemQueueEntry {
   workflowId?: string;
   createBranch?: boolean;
   skippedStepIds?: string[];
+  /** A waiting task's early UI Planning start. */
+  early?: boolean;
+  /** Continues this held run instead of starting a new one. */
+  resumeRunId?: string;
   position?: number;
   createdAt: string;
 }
@@ -534,6 +540,8 @@ export interface ExecutePlanItemOptions {
   skippedStepIds?: string[];
   /** The Start task dialog's Auto-merge switch. Saved only when the start is accepted; left out, the task's setting is unchanged. */
   autoMerge?: boolean;
+  /** "UI planning waits for parent" (start-when-ready only). Saved only when the start is accepted. */
+  uiPlanningWaitsForParent?: boolean;
 }
 
 /** A file browser's listing — POSIX-relative paths, empty folders included: the Documents tab's `.docs/` folder (server/src/projects/docsFiles.ts) or the Code tab's whole project (server/src/projects/fileTree.ts). */
@@ -1084,6 +1092,8 @@ export interface WorkflowStep extends WorkflowAgentConfig {
   canEditCode: boolean;
   /** Whether a read-only step may run shell commands and use the testing tools; absent reads as off. */
   canRunCommands?: boolean;
+  /** Whether this step gets a headless browser to check the running app; needs `canEditCode` or `canRunCommands`. */
+  canUseBrowser?: boolean;
   /** Whether this step pauses the run for a human decision instead of advancing straight to the next step. */
   requiresApproval: boolean;
   /** Makes this step a review-type loop origin — see server/src/domain/types.ts's WorkflowStep.loopBack. Null/absent for a step that isn't a loop origin. */
@@ -1092,6 +1102,8 @@ export interface WorkflowStep extends WorkflowAgentConfig {
   requestChangesToStepId?: string | null;
   /** What the step's detail in the run view offers as a Quick look; absent or null means none. See server/src/domain/types.ts's QuickLookKind. */
   quickLook?: QuickLookKind | null;
+  /** When `'html'`, complete_step is refused until it carries a real HTML mockup — see server/src/domain/types.ts's WorkflowStep.requiredOutputFormat. Absent or null leaves outputs optional. */
+  requiredOutputFormat?: 'html' | null;
 }
 
 export type QuickLookKind = 'none' | 'code' | 'diff' | 'documents' | 'commands';
@@ -1170,7 +1182,18 @@ export interface RunStartup {
   reuseBranch: boolean;
 }
 
-export type WorkflowRunStatus = 'starting' | 'running' | 'awaiting-approval' | 'needs-attention' | 'completing' | 'completed' | 'failed' | 'stopped';
+/** `held`: an early run whose UI Planning is done (or whose revision waits for a slot); it waits for the parents or a slot (see `WorkflowRunEarly`). */
+export type WorkflowRunStatus = 'starting' | 'running' | 'held' | 'awaiting-approval' | 'needs-attention' | 'completing' | 'completed' | 'failed' | 'stopped';
+
+/** A waiting task's early UI Planning run (server `WorkflowRunRecord.early`): only `stepId` runs before the parents are merged. */
+export interface WorkflowRunEarly {
+  stepId: string;
+  revisions: number;
+  skipped?: boolean;
+  /** The parents are merged; the run waits for a free slot to continue. */
+  released?: boolean;
+  pendingRevision?: { message: string };
+}
 
 /**
  * One run of a Workflow against one PlanItem. Snapshots its WorkflowRecord at creation time
@@ -1202,6 +1225,8 @@ export interface WorkflowRunRecord {
   loopRoundAllowance: number;
   /** Set only on a run that re-ran a completed bug after a regression: per step, the rounds it had in earlier runs, so this run's rounds are numbered after them. */
   regression?: { roundOffsets: Record<string, number> };
+  /** Set only on a waiting task's early UI Planning run. */
+  early?: WorkflowRunEarly;
   /** Set only on a testing-setup run — its mode and latest validation evidence. */
   testingSetup?: { mode: TestingSetupMode; evidence: TestingSetupEvidence | null };
   /** Set only on a conflict-resolution run: its pull request, and how it ended once it has (`outcome` null until then). */
@@ -1901,6 +1926,9 @@ export const serverApi = {
   /** Starts a dependent task now when every parent is satisfied, else makes it wait. */
   startWhenReady: (projectId: string, itemId: string, options: ExecutePlanItemOptions): Promise<StartWhenReadyResult> =>
     request(`/api/projects/${projectId}/plan-items/${itemId}/start-when-ready`, { method: 'POST', body: JSON.stringify(options) }),
+  /** Saves "UI planning waits for parent". 400 not a boolean, 409 once UI Planning started or the task can no longer change. */
+  setUiPlanningWaits: (projectId: string, itemId: string, uiPlanningWaitsForParent: boolean): Promise<PlanItem> =>
+    request(`/api/projects/${projectId}/plan-items/${itemId}/ui-planning-waits`, { method: 'PUT', body: JSON.stringify({ uiPlanningWaitsForParent }) }),
   cancelWaiting: (projectId: string, itemId: string): Promise<PlanItem> =>
     request(`/api/projects/${projectId}/plan-items/${itemId}/cancel-waiting`, { method: 'POST' }),
   /** Makes every ready task of a planning session depend on the previous one, optionally with Auto-merge on. */

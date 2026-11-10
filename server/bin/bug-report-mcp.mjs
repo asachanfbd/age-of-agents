@@ -102,11 +102,12 @@ if (process.env.AGENT_VISUAL_OS_DEPENDENCY_TOOL === '1') {
       properties: {
         itemId: { type: 'string', description: 'The id of the task or bug whose parents to set.' },
         dependsOn: { type: 'array', items: { type: 'string' }, description: 'Ids of the parents. [] clears them.' },
+        uiPlanningWaitsForParent: { type: 'boolean', description: '"UI planning waits for parent": true only when this item\'s UI builds on UI a parent introduces (nothing runs until the parents are merged); false (the default) runs its UI Planning as soon as it is started. Omit to keep the stored value.' },
       },
       required: ['itemId', 'dependsOn'],
       additionalProperties: false,
     },
-    call: (args) => daemon('PUT', `/${encodeURIComponent(args?.itemId ?? '')}/dependencies`, { dependsOn: args?.dependsOn }, (item) => `Set ${item.id} to wait for ${item.dependsOn?.length ?? 0} parent(s)`),
+    call: (args) => daemon('PUT', `/${encodeURIComponent(args?.itemId ?? '')}/dependencies`, { dependsOn: args?.dependsOn, ...(args?.uiPlanningWaitsForParent !== undefined ? { uiPlanningWaitsForParent: args.uiPlanningWaitsForParent } : {}) }, (item) => `Set ${item.id} to wait for ${item.dependsOn?.length ?? 0} parent(s)`),
   });
 }
 

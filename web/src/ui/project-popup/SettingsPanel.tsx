@@ -248,6 +248,7 @@ function StageRow({ step, steps, executors }: { step: WorkflowStep; steps: Workf
         </span>
         <Badge variant={step.canEditCode ? 'warning' : 'secondary'}>{step.canEditCode ? 'Edits code' : 'Read-only'}</Badge>
         {step.canRunCommands && !step.canEditCode && <Badge variant="outline">Runs commands</Badge>}
+        {step.canUseBrowser && <Badge variant="outline">Uses browser</Badge>}
         {step.requiresApproval && <Badge variant="secondary">Needs approval</Badge>}
         {executorLabel && <Badge variant="outline">{executorLabel}</Badge>}
       </div>

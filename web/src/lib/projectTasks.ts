@@ -2,6 +2,7 @@ import { formatCompactDuration } from './sessionTiming';
 import { groupTaskChains } from './taskChain';
 import { bugCardInfo, isBugItem, relatedLinks, bugGroupId, bugReportLinkedItems, buildBugGroups, compareBugGroupOrder, isBugReportSession, isReadyBug, planAndBugsLinkedItems, referenceCardId, sessionKindOf, type SessionKind } from './bugs';
 import type { BugCardInfo, BugReferenceGroup, RelatedLink } from './bugs';
+import type { EarlyPhase } from './earlyUiPlanning';
 import type { ExecutorProfile, PlanItemQueueEntry, TokenUsage, WorkflowRunRecord } from './serverApi';
 import { queuePlaces } from './waitingList';
 import type { QueuedPlace } from './waitingList';
@@ -80,6 +81,8 @@ export interface OpenTaskRow {
   waiting?: WaitingData;
   /** Set while the task waits in line for a free slot at the Project's task limit; the board groups it with the waiting tasks. */
   queued?: QueuedPlace;
+  /** How far a waiting task's early UI Planning has got (set by `buildTaskGroups`, which knows the run). */
+  earlyPhase?: EarlyPhase;
   /** The card's type badge, for an item that isn't an ordinary task — see `planItemTypeLabel`. */
   typeLabel?: string;
   /** Set only on a bug: its Bug badge extras, wherever the card shows — see `lib/bugs.ts`'s `bugCardInfo`. */

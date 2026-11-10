@@ -278,7 +278,7 @@ test('C6 the details header mounts the Depends on section with add, remove and t
 
 test('C7 the board card shows the waiting banner from the row', async () => {
   const board = await read('../src/ui/project-popup/TaskBoard.tsx');
-  assert.match(board, /\{waiting && !queued && <WaitingBanner waiting=\{waitingView\(waiting\)!\} \/>\}/);
+  assert.match(board, /\{waiting && \(!queued \|\| earlyPhaseLine\?\.queued\) && <WaitingBanner waiting=\{waitingView\(waiting\)!\} \/>\}/);
   assert.match(board, /waiting=\{row\.waiting\}/);
   const control = await read('../src/ui/project-popup/DependenciesControl.tsx');
   assert.match(control, /data-waiting-banner/);
@@ -297,7 +297,7 @@ test('C8 the group header offers Chain tasks with the auto-merge checkbox and th
 
 test('C9 the start dialog confirms "Start when parents are merged" as its second step', async () => {
   const dialogs = await read('../src/ui/project-popup/TaskDialogs.tsx');
-  assert.match(dialogs, />\{START_WHEN_MERGED_LABEL\}<\/Button>/);
+  assert.match(dialogs, />\{parentsView\.primaryLabel\}<\/Button>/, 'START_WHEN_MERGED_LABEL, or "Start UI planning now" (lib/earlyUiPlanning.ts)');
   assert.match(dialogs, /onClick=\{\(\) => setConfirming\(true\)\}>Next<\/Button>/);
   const actions = await read('../src/ui/project-popup/useTaskActions.ts');
   assert.match(actions, /await startPlanItem\(project\.id, row\.id, options\)/);
@@ -404,7 +404,7 @@ test('link-dropping a card is handled on the card, apart from the column reorder
 
 test('the board shows Waiting/Blocked as the card status and nests dependents under their parent', async () => {
   const board = await read('../src/ui/project-popup/TaskBoard.tsx');
-  assert.match(board, /status=\{row\.queued \? null : row\.waiting \? waitingView\(row\.waiting\)!\.badge/);
+  assert.match(board, /status=\{openCardStatus\(row\)\}/, 'Waiting or Blocked from the row (lib/earlyUiPlanning.ts)');
   const panel = await read('../src/ui/project-popup/TasksPanel.tsx');
   assert.match(panel, /dependencyForest\(columns\[column\]/);
   assert.match(panel, /data-dependents-of=/);

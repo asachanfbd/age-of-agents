@@ -35,12 +35,12 @@ const APPROVAL_RULE = 'This edits a shared Catalog definition used by every proj
 const TOOLS = [
   {
     name: 'complete_step',
-    description: 'Finish this workflow step. Call this once, when you are done. `verdict` is REQUIRED (either "pass" or "issues") when this step reviews earlier work and can send it back for revision; otherwise omit it. Set `planningGap` only when you hit an ambiguity that should have been resolved during planning, before this step started.',
+    description: 'Finish this workflow step. Call this once, when you are done. `verdict` is REQUIRED (either "pass" or "issues") when this step reviews earlier work and can send it back for revision; otherwise omit it. Set `planningGap` only when you hit an ambiguity that should have been resolved during planning, before this step started. `outputs` are passed inline as strings, not written as files, so even a read-only step can and should send them. A step that requires an HTML mockup refuses the call without one: read the error, fix the outputs and call again.',
     inputSchema: {
       type: 'object',
       properties: {
         summary: SUMMARY,
-        outputs: { type: 'array', items: OUTPUT, description: 'This step\'s own artifacts (e.g. one HTML mockup per screen), if it produces any.' },
+        outputs: { type: 'array', items: OUTPUT, description: 'This step\'s own artifacts (e.g. one self-contained HTML mockup per screen), if it produces any. Each one is passed inline as a string in `content`; outputs are not files and need no file-write permission, so a read-only step can always send them.' },
         verdict: { type: 'string', enum: ['pass', 'issues'] },
         planningGap: { type: 'string', description: 'Optional. An ambiguity or missing decision in the task\'s specification that planning should have resolved before you started — what was unclear and what you decided. The retro step uses it to improve future planning. Omit it when there was none.' },
       },

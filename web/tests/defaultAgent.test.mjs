@@ -78,7 +78,7 @@ test('W13 a pick that fell back is not restored when the agent frees up again', 
 test('W32 W33 the dialog keeps its own state when a start is refused, and only an accepted start closes it', async () => {
   const dialogs = await source('ui/project-popup/TaskDialogs.tsx');
   const start = dialogs.slice(dialogs.indexOf('async function start()'), dialogs.indexOf('if (parents === null) return null;'));
-  assert.match(start, /await onStart\(startOptions/);
+  assert.match(start, /await onStart\(\{ \.\.\.startOptions/);
   assert.doesNotMatch(start.slice(start.indexOf('catch')), /setAutoMerge|setCreateBranch/, 'a refusal never resets the switch');
   const panel = await source('ui/project-popup/TasksPanel.tsx');
   assert.match(panel, /await actions\.start\(dialog\.row, options\);\s*setDialog\(null\);/, 'closing happens only after the daemon accepted it');
@@ -236,7 +236,7 @@ test('C11-C13 C17 the Start task dialog: field order, a Steps expander button, t
   assert.match(dialog, /<Switch id="start-auto-merge" checked=\{state\.checked\} disabled=\{state\.disabled\}/, 'C13');
   assert.match(dialog, /state\.reason \?\? /);
   assert.match(body, /function ParentsConfirmation/, 'C17 the dependent-task screen is still there');
-  assert.match(body, /START_WHEN_MERGED_LABEL/);
+  assert.match(body, /\{parentsView\.primaryLabel\}/, 'the parents step names its primary action from startParentsView');
   assert.match(body, /const \[stepsOpen, setStepsOpen\] = useState\(false\);/, 'collapsed on every open');
   assert.match(body, /setSelection\(initialStepSelection\(workflows\.find/, 'a workflow change resets the selection and leaves stepsOpen alone');
 });

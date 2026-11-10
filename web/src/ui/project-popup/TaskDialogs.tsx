@@ -13,8 +13,9 @@ import { isRegressionReasonValid, regressionCounterLabel, REGRESSION_REASON_MAX 
 import { initialStepSelection, skippedStepIds, stepSelectionCount, stepTag, toggleStepSelection, type StepSelection } from '../../lib/stepSelection';
 import type { WorkflowRecord, WorkflowStep } from '../../lib/serverApi';
 import { autoMergeAfterBranchChange, autoMergeSwitch, startOptions, stepsAreExpanded } from '../../lib/startTaskDialog';
-import { START_WHEN_MERGED_LABEL } from '../../lib/dependencies';
 import type { StartConfirmParent } from '../../lib/dependencies';
+import { startParentsView, UI_WAITS_HELP_OFF, UI_WAITS_HELP_ON, UI_WAITS_LABEL } from '../../lib/earlyUiPlanning';
+import type { StartParentsView } from '../../lib/earlyUiPlanning';
 import { taskConflictOf, type TaskConflict } from '../../lib/taskConflicts';
 import { fullProjectNote, slotCap } from '../../lib/waitingList';
 import { TaskConflictAlert } from './TaskConflictAlert';
@@ -134,6 +135,7 @@ export function StartTaskDialog({
   hasRepository,
   slotsInUse = 0,
   initialAutoMerge = false,
+  initialUiPlanningWaits = false,
   onStart,
   onCancel,
   onOpenTask,
@@ -154,7 +156,10 @@ export function StartTaskDialog({
   slotsInUse?: number;
   /** The task's current Auto-merge setting, which the switch opens in. */
   initialAutoMerge?: boolean;
-  onStart: (options: ReturnType<typeof startOptions>) => Promise<void>;
+  /** The task's stored "UI planning waits for parent", which the parents step's switch opens in. */
+  initialUiPlanningWaits?: boolean;
+  /** Carries `uiPlanningWaitsForParent` for a task with parents; it is saved only once the start is accepted. */
+  onStart: (options: ReturnType<typeof startOptions> & { uiPlanningWaitsForParent?: boolean }) => Promise<void>;
   onCancel: () => void;
   /** Opens a task the limit message lists; the dialog closes first. */
   onOpenTask?: (target: ConflictRow['target']) => void;
@@ -168,6 +173,7 @@ export function StartTaskDialog({
   const [stepsOpen, setStepsOpen] = useState(false);
   const [starting, setStarting] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [uiWaits, setUiWaits] = useState(initialUiPlanningWaits);
   const [error, setError] = useState('');
   const [conflict, setConflict] = useState<TaskConflict | null>(null);
   const fullNote = fullProjectNote(slotsInUse, slotCap(hasRepository));
@@ -189,8 +195,9 @@ export function StartTaskDialog({
     setError('');
     setConflict(null);
     const skipped = skippedStepIds(steps, selection);
+    const waits = parents && parents.length > 0 ? { uiPlanningWaitsForParent: uiWaits } : {};
     try {
-      await onStart(startOptions({ executorId, createBranch, hasRepository, autoMerge, workflowId, skippedStepIds: skipped }));
+      await onStart({ ...startOptions({ executorId, createBranch, hasRepository, autoMerge, workflowId, skippedStepIds: skipped }), ...waits });
     } catch (failure) {
       const refused = taskConflictOf(failure);
       if (refused) setConflict(refused);
@@ -200,6 +207,7 @@ export function StartTaskDialog({
   }
 
   if (parents === null) return null;
+  const parentsView = startParentsView({ steps, skippedStepIds: skippedStepIds(steps, selection), createBranch, waits: uiWaits, slotsInUse, cap: slotCap(hasRepository) });
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onCancel(); }}>
       <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-md" hideClose>
@@ -207,7 +215,7 @@ export function StartTaskDialog({
           <DialogTitle>Start task</DialogTitle>
           <DialogDescription className="break-words">Choose how &ldquo;{title}&rdquo; runs.</DialogDescription>
         </DialogHeader>
-        {confirming ? <ParentsConfirmation parents={parents} /> : <>
+        {confirming ? <ParentsConfirmation parents={parents} view={parentsView} waits={uiWaits} onWaitsChange={setUiWaits} /> : <>
         {infoWarning && <p role="status" className="rounded-md bg-warning/15 px-3 py-2 text-xs text-warning-foreground">{infoWarning}</p>}
         {workflows.length > 0 && (
           <div className="grid gap-2">
@@ -253,22 +261,36 @@ export function StartTaskDialog({
         <DialogFooter className="gap-2 sm:space-x-0">
           <Button type="button" variant="outline" onClick={confirming ? () => setConfirming(false) : onCancel}>{confirming ? 'Back' : 'Cancel'}</Button>
           {confirming
-            ? <Button type="button" disabled={starting} onClick={() => void start()}>{START_WHEN_MERGED_LABEL}</Button>
+            ? <Button type="button" disabled={starting} onClick={() => void start()}>{parentsView.primaryLabel}</Button>
             : parents.length > 0
               ? <Button type="button" disabled={!executorId || needsWorkflow || noStepSelected} onClick={() => setConfirming(true)}>Next</Button>
               : <Button type="button" disabled={!executorId || needsWorkflow || noStepSelected || starting} onClick={() => void start()}>Start</Button>}
         </DialogFooter>
         {fullNote && !confirming && <p className="text-xs text-muted-foreground" data-full-note>{fullNote}</p>}
+        {confirming && parentsView.fullNote && <p className="text-xs text-muted-foreground" data-early-full-note>{parentsView.fullNote}</p>}
       </DialogContent>
     </Dialog>
   );
 }
 
-/** The second step of starting a dependent task: it waits, staying in Planning, until these parents are merged. */
-function ParentsConfirmation({ parents }: { parents: StartConfirmParent[] }) {
+/**
+ * The second step of starting a dependent task: "UI planning waits for parent" (or why nothing runs early), what
+ * happens until these parents are merged, and the parents themselves.
+ */
+function ParentsConfirmation({ parents, view, waits, onWaitsChange }: { parents: StartConfirmParent[]; view: StartParentsView; waits: boolean; onWaitsChange: (waits: boolean) => void }) {
+  const id = useId();
   return (
     <div className="grid gap-2" data-start-confirm>
-      <p className="text-sm">This task starts by itself once these parent tasks are merged into the checked-out branch. Until then it shows in Running as Waiting, and you can cancel waiting at any time.</p>
+      {view.switchShown ? (
+        <div className="grid gap-1" data-ui-waits="start">
+          <div className="flex items-start gap-2">
+            <Switch id={id} className="mt-0.5 shrink-0" checked={waits} aria-describedby={`${id}-help`} onCheckedChange={onWaitsChange} />
+            <Label htmlFor={id} className="min-w-0 cursor-pointer text-sm leading-5 font-normal">{UI_WAITS_LABEL}</Label>
+          </div>
+          <p id={`${id}-help`} className="pl-10 text-xs text-muted-foreground">{waits ? UI_WAITS_HELP_ON : UI_WAITS_HELP_OFF}</p>
+        </div>
+      ) : <p className="text-xs text-muted-foreground" data-ui-waits-note>{view.note}</p>}
+      <p className="text-sm">{view.body}</p>
       <ul className="grid gap-1 rounded-md border px-3 py-2 text-xs">
         {parents.map((parent) => <li key={parent.id}><span className="font-medium">{parent.label}</span> <span className="text-muted-foreground">{parent.status}</span></li>)}
       </ul>

@@ -118,6 +118,20 @@ test('complete_step and skip_step describe their summary, outputs and reason in 
   }
 });
 
+test('B036 complete_step says outputs are inline strings that need no file-write permission', async () => {
+  const mcp = startMcp();
+  try {
+    const tools = await mcp.listTools() as unknown as { name: string; description: string; inputSchema: { properties: Record<string, { type?: string; description?: string }> } }[];
+    const complete = tools.find((t) => t.name === STEP_TASK_TOOLS.complete)!;
+    assert.match(complete.description, /passed inline as strings, not written as files/);
+    const outputs = complete.inputSchema.properties.outputs!;
+    assert.equal(outputs.type, 'array');
+    assert.match(outputs.description!, /passed inline as a string in `content`; outputs are not files and need no file-write permission/);
+  } finally {
+    mcp.close();
+  }
+});
+
 test('update_workflow_step reads the workflow, then PUTs every step back with only the named step\'s instructions changed', async () => {
   responses.push({ status: 200, body: JSON.stringify(WORKFLOW) }, { status: 200, body: JSON.stringify(WORKFLOW) });
   const mcp = startMcp();
