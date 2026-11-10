@@ -20,3 +20,7 @@ npm run prod:update    # stop, git pull, reinstall, start again — from a termi
 Override ports with `PORT=... WEB_PORT=... npm run prod:start`.
 
 A production-style run also checks for updates itself and offers to apply them from inside the app — the status footer's update item shows "Update available" once `origin` has moved ahead, and applying it either rebuilds the web app in place with no interruption (a web-only change) or waits for an idle moment before running the same stop/pull/install/start sequence as `npm run prod:update` above (a server change). See `docs/blueprint.md`'s "App update" sections for the full contract; this in-app path is unavailable in `npm run dev`, where the footer only shows whether an update exists.
+
+
+Have a question or looking for setup help? 
+👉 [Ask in GitHub Discussions](https://github.com/asachanfbd/age-of-agents/discussions)
